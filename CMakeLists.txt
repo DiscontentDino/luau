@@ -199,7 +199,9 @@ target_compile_options(isocline PRIVATE ${LUAU_OPTIONS} ${ISOCLINE_OPTIONS})
 if(LUAU_EXTERN_C)
     # enable extern "C" for VM (lua.h, lualib.h) and Compiler (luacode.h) to make Luau friendlier to use from non-C++ languages
     # note that we enable LUA_USE_LONGJMP=1 as well; otherwise functions like luaL_error will throw C++ exceptions, which can't be done from extern "C" functions
-    target_compile_definitions(Luau.VM PUBLIC LUA_USE_LONGJMP=1)
+    if (NOT LUAU_ERRORS_AS_RETURNS)
+        target_compile_definitions(Luau.VM PUBLIC LUA_USE_LONGJMP=1)
+    endif()
 
     if(LUAU_BUILD_SHARED)
         if(MSVC)
