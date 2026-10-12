@@ -1648,11 +1648,23 @@ int lua_haserror(lua_State* L)
     return L->global->errcode;
 }
 #else
+int lua_raiseerror(lua_State* L)
+{
+    api_checknelems(L, 1);
+
+    luaD_throw(L, LUA_ERRRUN);
+}
+
 l_noret lua_error(lua_State* L)
 {
     api_checknelems(L, 1);
 
     luaD_throw(L, LUA_ERRRUN);
+}
+
+int lua_haserror(lua_State* L)
+{
+    return 0;
 }
 #endif
 

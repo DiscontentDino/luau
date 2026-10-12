@@ -4,11 +4,11 @@
 
 #include "lua.h"
 
-#if LUAU_ERRORS_AS_RETURNS
 #define luaL_raiseerror(L, fmt, ...) luaL_raiseerrorL(L, fmt, ##__VA_ARGS__)
 #define luaL_raisetypeerror(L, narg, tname) luaL_raisetypeerrorL(L, narg, tname)
 #define luaL_raiseargerror(L, narg, extramsg) luaL_raiseargerrorL(L, narg, extramsg)
-#else
+
+#if !LUAU_ERRORS_AS_RETURNS
 #define luaL_error(L, fmt, ...) luaL_errorL(L, fmt, ##__VA_ARGS__)
 #define luaL_typeerror(L, narg, tname) luaL_typeerrorL(L, narg, tname)
 #define luaL_argerror(L, narg, extramsg) luaL_argerrorL(L, narg, extramsg)
@@ -28,11 +28,12 @@ LUALIB_API int luaL_callmeta(lua_State* L, int obj, const char* e);
 LUALIB_API int luaL_raisetypeerrorL(lua_State* L, int narg, const char* tname);
 LUALIB_API int luaL_raiseargerrorL(lua_State* L, int narg, const char* extramsg);
 #else
+LUALIB_API int LUA_NORETURN luaL_raisetypeerrorL(lua_State* L, int narg, const char* tname);
+LUALIB_API int LUA_NORETURN luaL_raiseargerrorL(lua_State* L, int narg, const char* extramsg);
 LUALIB_API l_noret luaL_typeerrorL(lua_State* L, int narg, const char* tname);
 LUALIB_API l_noret luaL_argerrorL(lua_State* L, int narg, const char* extramsg);
 #endif
 
-#if LUAU_ERRORS_AS_RETURNS
 LUALIB_API LUA_NODISCARD int luaL_requirelstring(lua_State* L, int narg, const char** out, size_t* len);
 LUALIB_API LUA_NODISCARD int luaL_requireoptlstring(lua_State* L, int narg, const char* def, const char** out, size_t* len);
 LUALIB_API LUA_NODISCARD int luaL_requirenumber(lua_State* L, int narg, double* out);
@@ -61,7 +62,8 @@ LUALIB_API LUA_NODISCARD int luaL_requireudatatagged(lua_State* L, int ud, int t
 LUALIB_API LUA_NODISCARD int luaL_requirebuffer(lua_State* L, int narg, void** out, size_t* len);
 
 LUALIB_API LUA_NODISCARD int luaL_requireoption(lua_State* L, int narg, const char* def, const char* const lst[], int* out);
-#else
+
+#if !LUAU_ERRORS_AS_RETURNS
 LUALIB_API const char* luaL_checklstring(lua_State* L, int numArg, size_t* l);
 LUALIB_API const char* luaL_optlstring(lua_State* L, int numArg, const char* def, size_t* l);
 LUALIB_API double luaL_checknumber(lua_State* L, int numArg);
@@ -98,6 +100,7 @@ LUALIB_API void luaL_where(lua_State* L, int lvl);
 #if LUAU_ERRORS_AS_RETURNS
 LUALIB_API LUA_PRINTF_ATTR(2, 3) int luaL_raiseerrorL(lua_State* L, const char* fmt, ...);
 #else
+LUALIB_API LUA_PRINTF_ATTR(2, 3) int LUA_NORETURN luaL_raiseerrorL(lua_State* L, const char* fmt, ...);
 LUALIB_API LUA_PRINTF_ATTR(2, 3) l_noret luaL_errorL(lua_State* L, const char* fmt, ...);
 #endif
 
@@ -117,7 +120,6 @@ LUALIB_API void luaL_traceback(lua_State* L, lua_State* L1, const char* msg, int
 ** ===============================================================
 */
 
-#if LUAU_ERRORS_AS_RETURNS
 #define luaL_argrequire(L, cond, arg, extramsg) \
     do \
     { \
@@ -130,16 +132,20 @@ LUALIB_API void luaL_traceback(lua_State* L, lua_State* L1, const char* msg, int
         if (!(cond)) \
             return luaL_raisetypeerror(L, arg, tname); \
     } while (0)
+
+#define luaL_requirestring(L, n, out) (luaL_requirelstring(L, (n), (out), NULL))
+#define luaL_requireoptstring(L, n, d, out) (luaL_requireoptlstring(L, (n), (d), (out), NULL))
+
+#if LUAU_ERRORS_AS_RETURNS
 #define luaL_propagate(L) \
     do \
     { \
         if (lua_haserror(L)) \
             return LUA_RAISED; \
     } while (0)
-
-#define luaL_requirestring(L, n, out) (luaL_requirelstring(L, (n), (out), NULL))
-#define luaL_requireoptstring(L, n, d, out) (luaL_requireoptlstring(L, (n), (d), (out), NULL))
 #else
+#define luaL_propagate(L) ((void)0)
+
 #define luaL_argcheck(L, cond, arg, extramsg) ((void)((cond) ? (void)0 : luaL_argerror(L, arg, extramsg)))
 #define luaL_argexpected(L, cond, arg, tname) ((void)((cond) ? (void)0 : luaL_typeerror(L, arg, tname)))
 
@@ -175,7 +181,12 @@ typedef struct luaL_Strbuf luaL_Buffer;
 // in general, functions expect the mutable string buffer to be placed on top of the stack (top-1)
 // with the exception of luaL_addvalue that expects the value at the top and string buffer further away (top-2)
 
+#if LUAU_ERRORS_AS_RETURNS
+#define luaL_addchar(B, c) \
+    ((void)((B)->p < (B)->end || luaL_prepbuffsize(B, 1)), (B)->p < (B)->end ? (void)(*(B)->p++ = (char)(c)) : (void)0)
+#else
 #define luaL_addchar(B, c) ((void)((B)->p < (B)->end || luaL_prepbuffsize(B, 1)), (*(B)->p++ = (char)(c)))
+#endif
 #define luaL_addstring(B, s) luaL_addlstring(B, s, strlen(s))
 
 LUALIB_API void luaL_buffinit(lua_State* L, luaL_Strbuf* B);
