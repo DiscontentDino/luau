@@ -589,6 +589,8 @@ void* luaM_new_(lua_State* L, size_t nsize, uint8_t memcat)
 
 void* luaM_trynew_(lua_State* L, size_t nsize, uint8_t memcat)
 {
+    luaD_propagate(L, nullptr);
+
     LUAU_ASSERT(nsize != 0);
     global_State* g = L->global;
 

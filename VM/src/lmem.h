@@ -39,8 +39,12 @@ LUAI_FUNC void luaM_freegcocaged_(lua_State* L, GCObject* block, size_t osize, u
 LUAI_FUNC void* luaM_realloc_(lua_State* L, void* block, size_t osize, size_t nsize, uint8_t memcat);
 
 #if LUAU_ERRORS_AS_RETURNS
+#define luaM_raisetoobig(L, ret)     do     {         luaM_settoobig(L);         return ret;     } while (0)
+
 LUAI_FUNC void luaM_settoobig(lua_State* L);
 #else
+#define luaM_raisetoobig(L, ret) luaM_toobig(L)
+
 LUAI_FUNC l_noret luaM_toobig(lua_State* L);
 #endif
 

@@ -20,6 +20,7 @@
 LuauClass* luaR_newblankclass(lua_State* L, TString* name, bool isopen)
 {
     LuauClass* classobject = luaM_newgco(L, LuauClass, sizeof(LuauClass), L->activememcat, LUA_TCLASS);
+    luaD_propagate(L, nullptr);
     luaC_init(L, classobject, LUA_TCLASS);
     classobject->name = name;
 
@@ -48,17 +49,21 @@ LuauClass* luaR_newblankclass(lua_State* L, TString* name, bool isopen)
 static void luaR_setupconstructor(lua_State* L, LuauClass* classobject, LuaTable* env)
 {
     classobject->metatable = luaH_new(L, 0, 1);
+    luaD_propagate(L);
     luaC_objbarrier(L, classobject, classobject->metatable);
 
     Closure* constructor = luaF_newCclosure(L, 0, env);
+    luaD_propagate(L);
     constructor->c.f = luaR_constructobject;
     constructor->c.debugname = luaS_new(L, "luaR_constructobject");
+    luaD_propagate(L);
 
     LUAU_ASSERT(iswhite(obj2gco(constructor)));
 
     constructor->c.cont = NULL;
 
     TValue* callSlot = luaH_setstr(L, classobject->metatable, L->global->tmname[TM_CALL]);
+    luaD_propagate(L);
     LUAU_ASSERT(ttisnil(callSlot));
     setclvalue(L, callSlot, constructor);
     luaC_barrier(L, classobject->metatable, callSlot);
@@ -70,8 +75,10 @@ static void luaR_setupconstructor(lua_State* L, LuauClass* classobject, LuaTable
     // If the code defines an explicit __init method, LOP_NEWCLASSMEMBER will
     // overwrite this.
     Closure* defaultCtor = luaF_newCclosure(L, 1, env);
+    luaD_propagate(L);
     defaultCtor->c.f = luaR_defaultcreateobject;
     defaultCtor->c.debugname = luaS_new(L, "luaR_defaultcreateobject");
+    luaD_propagate(L);
 
     setclassvalue(L, &defaultCtor->c.upvals[0], classobject);
     LUAU_ASSERT(iswhite(obj2gco(defaultCtor)));
@@ -79,6 +86,7 @@ static void luaR_setupconstructor(lua_State* L, LuauClass* classobject, LuaTable
     defaultCtor->c.cont = NULL;
 
     TString* initKey = luaS_new(L, "__init");
+    luaD_propagate(L);
     const TValue* initIndex = luaH_getstr(classobject->memberstooffset, initKey);
     const double initDouble = nvalue(initIndex);
     LUAU_ASSERT(initDouble >= classobject->numberofinstancemembers && initDouble < classobject->numberofallmembers);
@@ -100,8 +108,10 @@ LuauClass* luaR_newclass(
 {
     LUAU_ASSERT(L->global->GCthreshold == SIZE_MAX && "GC must be paused");
     LuauClass* classobject = luaR_newblankclass(L, name, false);
+    luaD_propagate(L, nullptr);
 
     classobject->staticmembers = luaM_newarray(L, numberofstaticmembers, TValue, classobject->memcat);
+    luaD_propagate(L, nullptr);
     // Initialize static members to nil, otherwise we may read uninitialized memory.
     for (uint32_t i = 0; i < numberofstaticmembers; i++)
         setnilvalue(&classobject->staticmembers[i]);
@@ -113,6 +123,7 @@ LuauClass* luaR_newclass(
     classobject->numberofallmembers = numberofinstancemembers + numberofstaticmembers;
 
     luaR_setupconstructor(L, classobject, envt);
+    luaD_propagate(L, nullptr);
 
     return classobject;
 }
@@ -124,6 +135,7 @@ LuauClass* luaR_newclass(
 LUAI_FUNC LuauClass* luaR_cloneclass(lua_State* L, LuauClass* classobject)
 {
     LuauClass* newclass = luaR_newblankclass(L, classobject->name, classobject->isopen);
+    luaD_propagate(L, nullptr);
 
     // newclass was just allocated, so it is white and none of the writes below need a write barrier.
     LUAU_ASSERT(iswhite(obj2gco(newclass)));
@@ -137,21 +149,28 @@ LUAI_FUNC LuauClass* luaR_cloneclass(lua_State* L, LuauClass* classobject)
     // The name->offset mapping is fixed when the class shape is built and is never mutated afterwards (shapes in a Proto's constant table are
     // additionally marked readonly), so the clone shares it rather than paying for a table copy on every class definition that executes.
     newclass->memberstooffset = luaH_clone(L, classobject->memberstooffset);
+    luaD_propagate(L, nullptr);
 
     newclass->offsettomember = luaM_newarray(L, numallmembers, TString*, newclass->memcat);
+    luaD_propagate(L, nullptr);
     memcpy(newclass->offsettomember, classobject->offsettomember, numallmembers * sizeof(TString*));
 
     newclass->numberofallmembers = numallmembers;
 
     newclass->staticmembers = luaM_newarray(L, numstaticmembers, TValue, newclass->memcat);
+    luaD_propagate(L, nullptr);
     memcpy(newclass->staticmembers, classobject->staticmembers, numstaticmembers * sizeof(TValue));
 
     newclass->numberofinstancemembers = classobject->numberofinstancemembers;
 
     if (classobject->instancemetatable)
+    {
         newclass->instancemetatable = luaH_clone(L, classobject->instancemetatable);
+        luaD_propagate(L, nullptr);
+    }
 
     luaR_setupconstructor(L, newclass, getcurrenv(L));
+    luaD_propagate(L, nullptr);
 
     return newclass;
 }
@@ -172,6 +191,7 @@ void luaR_registerstaticmember(
     classObject->offsettomember[offset] = memberName;
 
     TValue* offsetVal = luaH_setstr(L, classObject->memberstooffset, memberName);
+    luaD_propagate(L);
     setnvalue(offsetVal, offset);
     luaC_barrier(L, classObject->memberstooffset, offsetVal);
 }
@@ -198,7 +218,7 @@ void luaR_inheritclass(lua_State* L, LuauClass* child, LuauClass* parent)
 {
     // First check if parent is open
     if (!parent->isopen)
-        luaG_runerror(L, "Non-open class '%s' cannot be extended", getstr(parent->name));
+        luaG_raiserunerror(L, , "Non-open class '%s' cannot be extended", getstr(parent->name));
 
     // Next, check for illegal instance member overrides
     if (parent->numberofinstancemembers > 0)
@@ -209,8 +229,9 @@ void luaR_inheritclass(lua_State* L, LuauClass* child, LuauClass* parent)
             const TValue* existing = luaH_getstr(child->memberstooffset, memberName);
             if (!ttisnil(existing))
             {
-                luaG_runerror(
+                luaG_raiserunerror(
                     L,
+                    ,
                     "Cannot override instance member '%s' of parent class '%s' in child class '%s'",
                     getstr(memberName),
                     getstr(parent->name),
@@ -241,6 +262,7 @@ void luaR_inheritclass(lua_State* L, LuauClass* child, LuauClass* parent)
         {
             TString* memberName = childOffsetToMember[idx];
             TValue* offsetInChild = luaH_setstr(L, child->memberstooffset, memberName);
+            luaD_propagate(L);
             setnvalue(offsetInChild, nvalue(offsetInChild) + parent->numberofinstancemembers);
         }
 
@@ -248,6 +270,7 @@ void luaR_inheritclass(lua_State* L, LuauClass* child, LuauClass* parent)
         {
             TString* memberName = parent->offsettomember[idx];
             TValue* offsetInChild = luaH_setstr(L, child->memberstooffset, memberName);
+            luaD_propagate(L);
             setnvalue(offsetInChild, idx);
             luaC_barrier(L, child->memberstooffset, offsetInChild);
         }
@@ -276,6 +299,7 @@ void luaR_inheritclass(lua_State* L, LuauClass* child, LuauClass* parent)
             childOffsetToMember = luaM_newarray(L, newNumberOfAllMembers, TString*, child->memcat);
         else
             luaM_reallocarray(L, childOffsetToMember, originalChildAllMembers, newNumberOfAllMembers, TString*, child->memcat);
+        luaD_propagate(L);
     }
 
     // Make room for parent instance members
@@ -298,6 +322,7 @@ void luaR_inheritclass(lua_State* L, LuauClass* child, LuauClass* parent)
                 L, childStaticMembers, childDeclaredStaticMembers, childDeclaredStaticMembers + numStaticMembersToCopy, TValue, child->memcat
             );
         }
+        luaD_propagate(L);
     }
 
     child->staticmembers = childStaticMembers;
@@ -324,6 +349,7 @@ void luaR_inheritclass(lua_State* L, LuauClass* child, LuauClass* parent)
             // We also need to add an entry to the memberstooffset table for this member
             uint32_t offsetInChildInt = child->numberofinstancemembers + staticMemberOffsetInChild;
             TValue* offsetInChild = luaH_setstr(L, child->memberstooffset, memberName);
+            luaD_propagate(L);
             setnvalue(offsetInChild, static_cast<int>(offsetInChildInt));
             luaC_barrier(L, child->memberstooffset, offsetInChild);
 
@@ -341,6 +367,7 @@ void luaR_inheritclass(lua_State* L, LuauClass* child, LuauClass* parent)
     {
         LUAU_ASSERT(!child->instancemetatable);
         child->instancemetatable = luaH_clone(L, parent->instancemetatable);
+        luaD_propagate(L);
         luaC_objbarrier(L, child, child->instancemetatable);
     }
 }
@@ -355,10 +382,14 @@ void luaR_addclassmember(lua_State* L, LuauClass* classobject, TString* name, TV
     setobj2class(L, &classobject->staticmembers[offsetint - classobject->numberofinstancemembers], value);
     luaC_barrier(L, classobject, value);
 
-    classobject->hasuserinitinchain |= (name == luaS_newlstr(L, "__init", 6));
+    TString* initname = luaS_newlstr(L, "__init", 6);
+    luaD_propagate(L);
+    classobject->hasuserinitinchain |= (name == initname);
 
     // Only metamethods in the parser's allowlist are supported (see ALLOWED_METAMETHODS in Parser.cpp)
-    bool isMetamethod = (name == luaS_newlstr(L, "__tostring", 10));
+    TString* tostringname = luaS_newlstr(L, "__tostring", 10);
+    luaD_propagate(L);
+    bool isMetamethod = (name == tostringname);
     for (int i = 0; i < TM_N && !isMetamethod; i++)
         isMetamethod = (name == L->global->tmname[i]);
 
@@ -367,6 +398,7 @@ void luaR_addclassmember(lua_State* L, LuauClass* classobject, TString* name, TV
         if (!classobject->instancemetatable)
         {
             classobject->instancemetatable = luaH_new(L, 0, 1);
+            luaD_propagate(L);
             luaC_objbarrier(L, classobject, classobject->instancemetatable);
         }
         else
@@ -380,12 +412,13 @@ void luaR_addclassmember(lua_State* L, LuauClass* classobject, TString* name, TV
             {
                 const TValue* existing = luaH_getstr(classobject->instancemetatable, name);
                 if (!ttisnil(existing))
-                    luaG_runerror(
-                        L, "Overriding comparison metamethods is not allowed ('%s' in class '%s')", getstr(name), getstr(classobject->name)
+                    luaG_raiserunerror(
+                        L, , "Overriding comparison metamethods is not allowed ('%s' in class '%s')", getstr(name), getstr(classobject->name)
                     );
             }
         }
         TValue* dest = luaH_setstr(L, classobject->instancemetatable, name);
+        luaD_propagate(L);
         setobj2t(L, dest, value);
         luaC_barrier(L, classobject->instancemetatable, value);
     }
@@ -394,10 +427,12 @@ void luaR_addclassmember(lua_State* L, LuauClass* classobject, TString* name, TV
 LuauObject* luaR_newblankobject(lua_State* L, LuauClass* classobject)
 {
     LuauObject* object = luaM_newgco(L, LuauObject, sizeof(LuauObject), L->activememcat, LUA_TOBJECT);
+    luaD_propagate(L, nullptr);
     memset(object, 0, sizeof(LuauObject));
     luaC_init(L, object, LUA_TOBJECT);
     object->lclass = classobject;
     object->members = luaM_newarray(L, classobject->numberofinstancemembers, TValue, L->activememcat);
+    luaD_propagate(L, nullptr);
     object->numberofmembers = classobject->numberofinstancemembers;
 
     return object;
@@ -409,11 +444,13 @@ int luaR_constructobject(lua_State* L)
     LuauClass* classobject = classvalue(L->base);
 
     LuauObject* self = luaR_newblankobject(L, classobject);
+    luaD_propagate(L, LUA_RAISED);
 
     for (uint32_t idx = 0; idx < classobject->numberofinstancemembers; idx++)
         setnilvalue(&self->members[idx]);
 
     TString* initKey = luaS_new(L, "__init");
+    luaD_propagate(L, LUA_RAISED);
     const TValue* initIndex = luaH_getstr(classobject->memberstooffset, initKey);
     const uint32_t initOffset = uint32_t(nvalue(initIndex)) - classobject->numberofinstancemembers;
 
@@ -428,6 +465,7 @@ int luaR_constructobject(lua_State* L)
     L->top++;
 
     luaD_checkstack(L, 2 + numargs);
+    luaD_propagate(L, LUA_RAISED);
 
     StkId argsBase = L->top;
     // __init itself.
@@ -442,6 +480,7 @@ int luaR_constructobject(lua_State* L)
         setobj2s(L, L->top++, L->base + i);
 
     luaD_call(L, argsBase, 0);
+    luaD_propagate(L, LUA_RAISED);
 
     // self is still at L->top - 1
     return 1;
@@ -452,16 +491,35 @@ int luaR_defaultcreateobject(lua_State* L)
     Closure* cl = clvalue(L->ci->func);
     LuauClass* classobject = classvalue(&cl->c.upvals[0]);
 
+#if LUAU_ERRORS_AS_RETURNS
+    if (classobject->hasuserinitinchain)
+        return luaL_raiseerror(L, "Class %s must define a constructor because it is derived from a class that defines one", getstr(classobject->name));
+
+    int numargs = lua_gettop(L);
+    if (numargs != 2)
+        return luaL_raiseerror(L, "The constructor of %s must be called with 2 arguments.  Got %d", getstr(classobject->name), numargs);
+#else
     if (classobject->hasuserinitinchain)
         luaL_error(L, "Class %s must define a constructor because it is derived from a class that defines one", getstr(classobject->name));
 
     int numargs = lua_gettop(L);
     if (numargs != 2)
         luaL_error(L, "The constructor of %s must be called with 2 arguments.  Got %d", getstr(classobject->name), numargs);
+#endif
 
     // L->base + 0 = self
     // L->base + 1 = props (if numargs == 2)
 
+#if LUAU_ERRORS_AS_RETURNS
+    if (!ttisobject(L->base))
+        return luaL_raiseerror(L, "%s.__init must be called with an instance of the class as its first argument", getstr(classobject->name));
+
+    LuauObject* classinst = objectvalue(L->base);
+    LUAU_ASSERT(classinst);
+
+    if (classinst->lclass != classobject)
+        return luaL_raiseerror(L, "Cannot call %s.__init on an instance of class %s", getstr(classobject->name), getstr(classinst->lclass->name));
+#else
     if (!ttisobject(L->base))
         luaL_error(L, "%s.__init must be called with an instance of the class as its first argument", getstr(classobject->name));
 
@@ -470,6 +528,7 @@ int luaR_defaultcreateobject(lua_State* L)
 
     if (classinst->lclass != classobject)
         luaL_errorL(L, "Cannot call %s.__init on an instance of class %s", getstr(classobject->name), getstr(classinst->lclass->name));
+#endif
 
     constexpr int propSlot = 1;
 
@@ -483,6 +542,7 @@ int luaR_defaultcreateobject(lua_State* L)
         TValue key;
         setsvalue(L, &key, classobject->offsettomember[idx]);
         luaV_gettable(L, L->base + propSlot, &key, L->top - 1);
+        luaD_propagate(L, LUA_RAISED);
         setobj(L, &classinst->members[idx], L->top - 1);
         luaC_barrier(L, classinst, &classinst->members[idx]);
     }
@@ -535,6 +595,7 @@ static LuauClassConstructMatch luaR_classmatchesshape(LuauClass* klass, LuaTable
 static void luaR_constructobjectpartial(lua_State* L, StkId target, LuauClass* klass, LuaTable* shape, LuauClassConstructMatch match)
 {
     LuauObject* self = luaR_newblankobject(L, klass);
+    luaD_propagate(L);
 
     if (match == LCM_MATCH_ZEROED)
     {
@@ -565,7 +626,9 @@ void luaR_tryconstructobject(lua_State* L, StkId target, StkId maybeclass, uint3
 
     if (!ttisclass(maybeclass))
     {
-        sethvalue(L, target, luaH_clone(L, shapeTable));
+        LuaTable* t = luaH_clone(L, shapeTable);
+        luaD_propagate(L);
+        sethvalue(L, target, t);
         return;
     }
 
@@ -589,7 +652,11 @@ void luaR_tryconstructobject(lua_State* L, StkId target, StkId maybeclass, uint3
     if (slot.construct.match != LCM_MISMATCH)
         luaR_constructobjectpartial(L, target, klass, shapeTable, slot.construct.match);
     else
-        sethvalue(L, target, luaH_clone(L, shapeTable));
+    {
+        LuaTable* t = luaH_clone(L, shapeTable);
+        luaD_propagate(L);
+        sethvalue(L, target, t);
+    }
 }
 
 void luaR_freeclass(lua_State* L, LuauClass* classobject, lua_Page* page)
