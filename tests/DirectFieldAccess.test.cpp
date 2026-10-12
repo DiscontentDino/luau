@@ -27,9 +27,14 @@ struct Vec2
 
 static int lua_createVec2(lua_State* L)
 {
-    double x = luaL_checknumber(L, 1);
-    double y = luaL_checknumber(L, 2);
+    double x;
+    if (!luaL_requirenumber(L, 1, &x))
+        return LUA_RAISED;
+    double y;
+    if (!luaL_requirenumber(L, 2, &y))
+        return LUA_RAISED;
     Vec2* p = static_cast<Vec2*>(lua_newuserdatatagged(L, sizeof(Vec2), kTagVec2));
+    luaL_propagate(L);
     p->x = x;
     p->y = y;
     return 1;

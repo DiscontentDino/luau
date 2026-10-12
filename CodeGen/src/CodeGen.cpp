@@ -194,6 +194,9 @@ unsigned int getCpuFeaturesX64()
 
 bool isSupported()
 {
+    if (LUAU_ERRORS_AS_RETURNS)
+        return false;
+
     if (LUA_EXTRA_SIZE != 1)
         return false;
 

@@ -6,7 +6,9 @@
 #include "lualib.h"
 #include "lstate.h"
 
+#if !LUAU_ERRORS_AS_RETURNS
 #include "Fixture.h"
+#endif
 #include "ScopedFlags.h"
 
 #include "doctest.h"

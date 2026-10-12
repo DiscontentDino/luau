@@ -1,18 +1,22 @@
 // This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
 #include "Luau/Common.h"
+#if !LUAU_ERRORS_AS_RETURNS
 #include "Luau/Type.h"
+#endif
 #include "lua.h"
 #include "lualib.h"
 #include "luacode.h"
 #include "luacodegen.h"
 #include "luajitinliner.h"
 
+#if !LUAU_ERRORS_AS_RETURNS
 #include "Luau/BuiltinDefinitions.h"
-#include "Luau/DenseHash.h"
 #include "Luau/ModuleResolver.h"
 #include "Luau/TypeInfer.h"
-#include "Luau/BytecodeBuilder.h"
 #include "Luau/Frontend.h"
+#endif
+#include "Luau/DenseHash.h"
+#include "Luau/BytecodeBuilder.h"
 #include "Luau/Compiler.h"
 #include "Luau/CodeGen.h"
 #include "Luau/BytecodeSummary.h"
@@ -137,8 +141,12 @@ static int lua_collectgarbage(lua_State* L)
         LUA_GCSTOP, LUA_GCRESTART, LUA_GCCOLLECT, LUA_GCCOUNT, LUA_GCISRUNNING, LUA_GCSTEP, LUA_GCSETGOAL, LUA_GCSETSTEPMUL, LUA_GCSETSTEPSIZE
     };
 
-    int o = luaL_checkoption(L, 1, "collect", opts);
-    int ex = luaL_optinteger(L, 2, 0);
+    int o;
+    if (!luaL_requireoption(L, 1, "collect", opts, &o))
+        return LUA_RAISED;
+    int ex;
+    if (!luaL_requireoptinteger(L, 2, 0, &ex))
+        return LUA_RAISED;
     int res = lua_gc(L, optsnum[o], ex);
     switch (optsnum[o])
     {
@@ -159,8 +167,12 @@ static int lua_collectgarbage(lua_State* L)
 static int lua_loadstring(lua_State* L)
 {
     size_t l = 0;
-    const char* s = luaL_checklstring(L, 1, &l);
-    const char* chunkname = luaL_optstring(L, 2, s);
+    const char* s;
+    if (!luaL_requirelstring(L, 1, &s, &l))
+        return LUA_RAISED;
+    const char* chunkname;
+    if (!luaL_requireoptstring(L, 2, s, &chunkname))
+        return LUA_RAISED;
 
     lua_setsafeenv(L, LUA_ENVIRONINDEX, false);
 
@@ -168,6 +180,7 @@ static int lua_loadstring(lua_State* L)
     char* bytecode = luau_compile(s, l, nullptr, &bytecodeSize);
     int result = luau_load(L, chunkname, bytecode, bytecodeSize, 0);
     free(bytecode);
+    luaL_propagate(L);
 
     if (result == 0)
         return 1;
@@ -179,8 +192,12 @@ static int lua_loadstring(lua_State* L)
 
 static int lua_vector_dot(lua_State* L)
 {
-    const LUA_VECTOR_TYPE* a = luaL_checkvector(L, 1);
-    const LUA_VECTOR_TYPE* b = luaL_checkvector(L, 2);
+    const LUA_VECTOR_TYPE* a;
+    if (!luaL_requirevector(L, 1, &a))
+        return LUA_RAISED;
+    const LUA_VECTOR_TYPE* b;
+    if (!luaL_requirevector(L, 2, &b))
+        return LUA_RAISED;
 
     lua_pushnumber(L, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]);
     return 1;
@@ -188,8 +205,12 @@ static int lua_vector_dot(lua_State* L)
 
 static int lua_vector_cross(lua_State* L)
 {
-    const LUA_VECTOR_TYPE* a = luaL_checkvector(L, 1);
-    const LUA_VECTOR_TYPE* b = luaL_checkvector(L, 2);
+    const LUA_VECTOR_TYPE* a;
+    if (!luaL_requirevector(L, 1, &a))
+        return LUA_RAISED;
+    const LUA_VECTOR_TYPE* b;
+    if (!luaL_requirevector(L, 2, &b))
+        return LUA_RAISED;
 
 #if LUA_VECTOR_SIZE == 4
     lua_pushvector(L, a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0], 0.0f);
@@ -202,8 +223,12 @@ static int lua_vector_cross(lua_State* L)
 
 static int lua_vector_index(lua_State* L)
 {
-    const LUA_VECTOR_TYPE* v = luaL_checkvector(L, 1);
-    const char* name = luaL_checkstring(L, 2);
+    const LUA_VECTOR_TYPE* v;
+    if (!luaL_requirevector(L, 1, &v))
+        return LUA_RAISED;
+    const char* name;
+    if (!luaL_requirestring(L, 2, &name))
+        return LUA_RAISED;
 
     if (strcmp(name, "Magnitude") == 0)
     {
@@ -235,7 +260,7 @@ static int lua_vector_index(lua_State* L)
         return 1;
     }
 
-    luaL_error(L, "%s is not a valid member of vector", name);
+    return luaL_raiseerror(L, "%s is not a valid member of vector", name);
 }
 
 static int lua_vector_namecall(lua_State* L)
@@ -249,7 +274,10 @@ static int lua_vector_namecall(lua_State* L)
             return lua_vector_cross(L);
     }
 
-    luaL_error(L, "%s is not a valid method of vector", luaL_checkstring(L, 1));
+    const char* self;
+    if (!luaL_requirestring(L, 1, &self))
+        return LUA_RAISED;
+    return luaL_raiseerror(L, "%s is not a valid method of vector", self);
 }
 
 int lua_silence(lua_State* L)
@@ -564,6 +592,8 @@ void setupVectorHelpers(lua_State* L)
 Vec2* lua_vec2_push(lua_State* L)
 {
     Vec2* data = (Vec2*)lua_newuserdatatagged(L, sizeof(Vec2), kTagVec2);
+    if (!data)
+        return nullptr;
 
     lua_getuserdatametatable(L, kTagVec2);
     lua_setmetatable(L, -2);
@@ -573,15 +603,24 @@ Vec2* lua_vec2_push(lua_State* L)
 
 Vec2* lua_vec2_get(lua_State* L, int idx)
 {
-    return (Vec2*)luaL_checkudatatagged(L, idx, kTagVec2);
+    void* p;
+    if (!luaL_requireudatatagged(L, idx, kTagVec2, &p))
+        return nullptr;
+    return (Vec2*)p;
 }
 
 static int lua_vec2(lua_State* L)
 {
-    double x = luaL_checknumber(L, 1);
-    double y = luaL_checknumber(L, 2);
+    double x;
+    if (!luaL_requirenumber(L, 1, &x))
+        return LUA_RAISED;
+    double y;
+    if (!luaL_requirenumber(L, 2, &y))
+        return LUA_RAISED;
 
     Vec2* data = lua_vec2_push(L);
+    if (!data)
+        return LUA_RAISED;
 
     data->x = float(x);
     data->y = float(y);
@@ -592,6 +631,8 @@ static int lua_vec2(lua_State* L)
 static int lua_vec2_dot(lua_State* L, Vec2* self)
 {
     Vec2* b = lua_vec2_get(L, 2);
+    if (!b)
+        return LUA_RAISED;
 
     lua_pushnumber(L, self->x * b->x + self->y * b->y);
     return 1;
@@ -600,8 +641,12 @@ static int lua_vec2_dot(lua_State* L, Vec2* self)
 static int lua_vec2_min(lua_State* L, Vec2* self)
 {
     Vec2* b = lua_vec2_get(L, 2);
+    if (!b)
+        return LUA_RAISED;
 
     Vec2* data = lua_vec2_push(L);
+    if (!data)
+        return LUA_RAISED;
 
     data->x = self->x < b->x ? self->x : b->x;
     data->y = self->y < b->y ? self->y : b->y;
@@ -612,6 +657,8 @@ static int lua_vec2_min(lua_State* L, Vec2* self)
 static int lua_vec2_clone(lua_State* L, Vec2* self)
 {
     Vec2* r = lua_vec2_push(L);
+    if (!r)
+        return LUA_RAISED;
     r->x = self->x;
     r->y = self->y;
     return 1;
@@ -620,6 +667,7 @@ static int lua_vec2_clone(lua_State* L, Vec2* self)
 static int lua_vec2_reenter(lua_State* L, Vec2* self)
 {
     lua_getglobal(L, "reenterCallback");
+    luaL_propagate(L);
     REQUIRE(lua_isfunction(L, -1));
     lua_pcall(L, 0, 0, 0);
 
@@ -630,7 +678,11 @@ static int lua_vec2_reenter(lua_State* L, Vec2* self)
 static int lua_vec2_index(lua_State* L)
 {
     Vec2* v = lua_vec2_get(L, 1);
-    const char* name = luaL_checkstring(L, 2);
+    if (!v)
+        return LUA_RAISED;
+    const char* name;
+    if (!luaL_requirestring(L, 2, &name))
+        return LUA_RAISED;
 
     if (strcmp(name, "X") == 0)
     {
@@ -655,6 +707,8 @@ static int lua_vec2_index(lua_State* L)
         float invSqrt = 1.0f / sqrtf(v->x * v->x + v->y * v->y);
 
         Vec2* data = lua_vec2_push(L);
+        if (!data)
+            return LUA_RAISED;
 
         data->x = v->x * invSqrt;
         data->y = v->y * invSqrt;
@@ -667,21 +721,27 @@ static int lua_vec2_index(lua_State* L)
         return 1;
     }
 
-    luaL_error(L, "%s is not a valid member of vector", name);
+    return luaL_raiseerror(L, "%s is not a valid member of vector", name);
 }
 
 static int lua_vec2_newindex(lua_State* L)
 {
     Vec2* v = lua_vec2_get(L, 1);
-    const char* name = luaL_checkstring(L, 2);
-    double value = luaL_checknumber(L, 3);
+    if (!v)
+        return LUA_RAISED;
+    const char* name;
+    if (!luaL_requirestring(L, 2, &name))
+        return LUA_RAISED;
+    double value;
+    if (!luaL_requirenumber(L, 3, &value))
+        return LUA_RAISED;
 
     if (strcmp(name, "X") == 0)
         v->x = float(value);
     else if (strcmp(name, "Y") == 0)
         v->y = float(value);
     else
-        luaL_error(L, "%s is not a writable member of vec2", name);
+        return luaL_raiseerror(L, "%s is not a writable member of vec2", name);
 
     return 0;
 }
@@ -691,6 +751,8 @@ static int lua_vec2_namecall(lua_State* L)
     if (const char* str = lua_namecallatom(L, nullptr))
     {
         Vec2* self = lua_vec2_get(L, 1);
+        if (!self)
+            return LUA_RAISED;
 
         if (strcmp(str, "Dot") == 0)
             return lua_vec2_dot(L, self);
@@ -705,12 +767,17 @@ static int lua_vec2_namecall(lua_State* L)
             return lua_vec2_reenter(L, self);
     }
 
-    luaL_error(L, "%s is not a valid method of vector", luaL_checkstring(L, 1));
+    const char* selfname;
+    if (!luaL_requirestring(L, 1, &selfname))
+        return LUA_RAISED;
+    return luaL_raiseerror(L, "%s is not a valid method of vector", selfname);
 }
 
 Vertex* lua_vertex_push(lua_State* L)
 {
     Vertex* data = (Vertex*)lua_newuserdatatagged(L, sizeof(Vertex), kTagVertex);
+    if (!data)
+        return nullptr;
 
     lua_getuserdatametatable(L, kTagVertex);
     lua_setmetatable(L, -2);
@@ -726,16 +793,25 @@ Vertex* lua_vertex_get(lua_State* L, int idx)
     if (a)
         return a;
 
-    luaL_typeerror(L, idx, "vertex");
+    luaL_raisetypeerror(L, idx, "vertex");
+    return nullptr;
 }
 
 static int lua_vertex(lua_State* L)
 {
-    const LUA_VECTOR_TYPE* pos = luaL_checkvector(L, 1);
-    const LUA_VECTOR_TYPE* normal = luaL_checkvector(L, 2);
+    const LUA_VECTOR_TYPE* pos;
+    if (!luaL_requirevector(L, 1, &pos))
+        return LUA_RAISED;
+    const LUA_VECTOR_TYPE* normal;
+    if (!luaL_requirevector(L, 2, &normal))
+        return LUA_RAISED;
     Vec2* uv = lua_vec2_get(L, 3);
+    if (!uv)
+        return LUA_RAISED;
 
     Vertex* data = lua_vertex_push(L);
+    if (!data)
+        return LUA_RAISED;
 
     data->pos[0] = float(pos[0]);
     data->pos[1] = float(pos[1]);
@@ -752,6 +828,8 @@ static int lua_vertex(lua_State* L)
 static int lua_vertex_clone(lua_State* L, Vertex* self)
 {
     Vertex* r = lua_vertex_push(L);
+    if (!r)
+        return LUA_RAISED;
     *r = *self;
     return 1;
 }
@@ -759,7 +837,11 @@ static int lua_vertex_clone(lua_State* L, Vertex* self)
 static int lua_vertex_index(lua_State* L)
 {
     Vertex* v = lua_vertex_get(L, 1);
-    const char* name = luaL_checkstring(L, 2);
+    if (!v)
+        return LUA_RAISED;
+    const char* name;
+    if (!luaL_requirestring(L, 2, &name))
+        return LUA_RAISED;
 
     if (strcmp(name, "pos") == 0)
     {
@@ -776,6 +858,8 @@ static int lua_vertex_index(lua_State* L)
     if (strcmp(name, "uv") == 0)
     {
         Vec2* uv = lua_vec2_push(L);
+        if (!uv)
+            return LUA_RAISED;
         uv->x = v->uv[0];
         uv->y = v->uv[1];
         return 1;
@@ -787,24 +871,32 @@ static int lua_vertex_index(lua_State* L)
         return 1;
     }
 
-    luaL_error(L, "%s is not a valid member of vertex", name);
+    return luaL_raiseerror(L, "%s is not a valid member of vertex", name);
 }
 
 static int lua_vertex_newindex(lua_State* L)
 {
     Vertex* v = lua_vertex_get(L, 1);
-    const char* name = luaL_checkstring(L, 2);
+    if (!v)
+        return LUA_RAISED;
+    const char* name;
+    if (!luaL_requirestring(L, 2, &name))
+        return LUA_RAISED;
 
     if (strcmp(name, "pos") == 0)
     {
-        const LUA_VECTOR_TYPE* pos = luaL_checkvector(L, 3);
+        const LUA_VECTOR_TYPE* pos;
+        if (!luaL_requirevector(L, 3, &pos))
+            return LUA_RAISED;
         v->pos[0] = float(pos[0]);
         v->pos[1] = float(pos[1]);
         v->pos[2] = float(pos[2]);
     }
     else if (strcmp(name, "normal") == 0)
     {
-        const LUA_VECTOR_TYPE* normal = luaL_checkvector(L, 3);
+        const LUA_VECTOR_TYPE* normal;
+        if (!luaL_requirevector(L, 3, &normal))
+            return LUA_RAISED;
         v->normal[0] = float(normal[0]);
         v->normal[1] = float(normal[1]);
         v->normal[2] = float(normal[2]);
@@ -812,12 +904,14 @@ static int lua_vertex_newindex(lua_State* L)
     else if (strcmp(name, "uv") == 0)
     {
         Vec2* uv = lua_vec2_get(L, 3);
+        if (!uv)
+            return LUA_RAISED;
         v->uv[0] = uv->x;
         v->uv[1] = uv->y;
     }
     else
     {
-        luaL_error(L, "%s is not a writable member of vertex", name);
+        return luaL_raiseerror(L, "%s is not a writable member of vertex", name);
     }
 
     return 0;
@@ -828,12 +922,17 @@ static int lua_vertex_namecall(lua_State* L)
     if (const char* str = lua_namecallatom(L, nullptr))
     {
         Vertex* self = lua_vertex_get(L, 1);
+        if (!self)
+            return LUA_RAISED;
 
         if (strcmp(str, "Clone") == 0)
             return lua_vertex_clone(L, self);
     }
 
-    luaL_error(L, "%s is not a valid method of vertex", luaL_checkstring(L, 1));
+    const char* selfname;
+    if (!luaL_requirestring(L, 1, &selfname))
+        return LUA_RAISED;
+    return luaL_raiseerror(L, "%s is not a valid method of vertex", selfname);
 }
 
 void setupUserdataHelpers(lua_State* L)
@@ -1065,6 +1164,8 @@ static void vec2DirectIndex(lua_State* L, void* data, int atom, uint16_t* cached
     {
         float inv = 1.0f / sqrtf(self->x * self->x + self->y * self->y);
         Vec2* r = lua_vec2_push(L);
+        if (!r)
+            return;
         r->x = self->x * inv;
         r->y = self->y * inv;
         break;
@@ -1073,7 +1174,13 @@ static void vec2DirectIndex(lua_State* L, void* data, int atom, uint16_t* cached
         lua_pushnumber(L, sizeof(Vec2));
         break;
     default:
-        luaL_error(L, "%s is not a valid member of vec2", luaL_checkstring(L, 2));
+    {
+        const char* name;
+        if (!luaL_requirestring(L, 2, &name))
+            return;
+        luaL_raiseerror(L, "%s is not a valid member of vec2", name);
+        return;
+    }
     }
 }
 
@@ -1087,13 +1194,29 @@ static void vec2DirectNewindex(lua_State* L, void* data, int atom, uint16_t* cac
     switch (DirectSlot(*cachedslot))
     {
     case DirectSlot::X:
-        self->x = float(luaL_checknumber(L, 3));
+    {
+        double value;
+        if (!luaL_requirenumber(L, 3, &value))
+            return;
+        self->x = float(value);
         break;
+    }
     case DirectSlot::Y:
-        self->y = float(luaL_checknumber(L, 3));
+    {
+        double value;
+        if (!luaL_requirenumber(L, 3, &value))
+            return;
+        self->y = float(value);
         break;
+    }
     default:
-        luaL_error(L, "%s is not a writable member of vec2", luaL_checkstring(L, 2));
+    {
+        const char* name;
+        if (!luaL_requirestring(L, 2, &name))
+            return;
+        luaL_raiseerror(L, "%s is not a writable member of vec2", name);
+        return;
+    }
     }
 }
 
@@ -1115,7 +1238,7 @@ static int vec2DirectNamecall(lua_State* L, void* data, int atom, uint16_t* cach
     case DirectSlot::Reenter:
         return lua_vec2_reenter(L, self);
     default:
-        luaL_error(L, "%s is not a valid method of vec2", lua_namecallatom(L, nullptr));
+        return luaL_raiseerror(L, "%s is not a valid method of vec2", lua_namecallatom(L, nullptr));
     }
 }
 
@@ -1137,6 +1260,8 @@ static void vertexDirectIndex(lua_State* L, void* data, int atom, uint16_t* cach
     case DirectSlot::UV:
     {
         Vec2* uv = lua_vec2_push(L);
+        if (!uv)
+            return;
         uv->x = self->uv[0];
         uv->y = self->uv[1];
         break;
@@ -1145,7 +1270,13 @@ static void vertexDirectIndex(lua_State* L, void* data, int atom, uint16_t* cach
         lua_pushnumber(L, sizeof(Vertex));
         break;
     default:
-        luaL_error(L, "%s is not a valid member of vertex", luaL_checkstring(L, 2));
+    {
+        const char* name;
+        if (!luaL_requirestring(L, 2, &name))
+            return;
+        luaL_raiseerror(L, "%s is not a valid member of vertex", name);
+        return;
+    }
     }
 }
 
@@ -1160,7 +1291,9 @@ static void vertexDirectNewindex(lua_State* L, void* data, int atom, uint16_t* c
     {
     case DirectSlot::Pos:
     {
-        const LUA_VECTOR_TYPE* pos = luaL_checkvector(L, 3);
+        const LUA_VECTOR_TYPE* pos;
+        if (!luaL_requirevector(L, 3, &pos))
+            return;
         self->pos[0] = float(pos[0]);
         self->pos[1] = float(pos[1]);
         self->pos[2] = float(pos[2]);
@@ -1168,7 +1301,9 @@ static void vertexDirectNewindex(lua_State* L, void* data, int atom, uint16_t* c
     }
     case DirectSlot::Normal:
     {
-        const LUA_VECTOR_TYPE* normal = luaL_checkvector(L, 3);
+        const LUA_VECTOR_TYPE* normal;
+        if (!luaL_requirevector(L, 3, &normal))
+            return;
         self->normal[0] = float(normal[0]);
         self->normal[1] = float(normal[1]);
         self->normal[2] = float(normal[2]);
@@ -1177,12 +1312,20 @@ static void vertexDirectNewindex(lua_State* L, void* data, int atom, uint16_t* c
     case DirectSlot::UV:
     {
         Vec2* uv = lua_vec2_get(L, 3);
+        if (!uv)
+            return;
         self->uv[0] = uv->x;
         self->uv[1] = uv->y;
         break;
     }
     default:
-        luaL_error(L, "%s is not a writable member of vertex", luaL_checkstring(L, 2));
+    {
+        const char* name;
+        if (!luaL_requirestring(L, 2, &name))
+            return;
+        luaL_raiseerror(L, "%s is not a writable member of vertex", name);
+        return;
+    }
     }
 }
 
@@ -1198,7 +1341,7 @@ static int vertexDirectNamecall(lua_State* L, void* data, int atom, uint16_t* ca
     case DirectSlot::Clone:
         return lua_vertex_clone(L, self);
     default:
-        luaL_error(L, "%s is not a valid method of vertex", lua_namecallatom(L, nullptr));
+        return luaL_raiseerror(L, "%s is not a valid method of vertex", lua_namecallatom(L, nullptr));
     }
 }
 
@@ -1361,7 +1504,9 @@ TEST_CASE("Tables")
                 {
                     if (lua_type(L, 1) == LUA_TNUMBER)
                     {
-                        unsigned v = luaL_checkunsigned(L, 1);
+                        unsigned v;
+                        if (!luaL_requireunsigned(L, 1, &v))
+                            return LUA_RAISED;
                         lua_pushlightuserdata(L, reinterpret_cast<void*>(uintptr_t(v)));
                     }
                     else
@@ -1380,7 +1525,10 @@ TEST_CASE("Tables")
                 L,
                 [](lua_State* L)
                 {
-                    reallocSizeLimit = luaL_checkunsigned(L, 1);
+                    unsigned limit;
+                    if (!luaL_requireunsigned(L, 1, &limit))
+                        return LUA_RAISED;
+                    reallocSizeLimit = limit;
                     return 0;
                 },
                 "setallocationlimit",
@@ -1510,7 +1658,10 @@ TEST_CASE("JitInliner")
         index++;
 
         if (index >= 1'000)
-            luaL_error(L, "timeout");
+        {
+            luaL_raiseerror(L, "timeout");
+            return;
+        }
     };
 
     for (int test = 1; test <= 3; ++test)
@@ -1523,7 +1674,7 @@ TEST_CASE("JitInliner")
         index = 0;
         int status = lua_resume(T, nullptr, 0);
         CHECK(status == LUA_ERRRUN);
-        CHECK(strstr(luaL_checkstring(T, -1), "timeout") != nullptr);
+        CHECK(strstr(lua_tostring(T, -1), "timeout") != nullptr);
 
         lua_pop(L, 1);
     }
@@ -1607,7 +1758,10 @@ TEST_CASE("GC")
                 L,
                 [](lua_State* L)
                 {
-                    blockableReallocAllowed = !luaL_checkboolean(L, 1);
+                    int block;
+                    if (!luaL_requireboolean(L, 1, &block))
+                        return LUA_RAISED;
+                    blockableReallocAllowed = !block;
                     return 0;
                 },
                 "setblockallocations",
@@ -1642,13 +1796,17 @@ static int runFinalizers(lua_State* L, bool toclose)
 {
     lua_State* co = lua_tothread(L, 1);
     lua_State* NL = lua_newthread(L);
+    luaL_propagate(L);
     lua_pushfinalizerfunction(NL, co, toclose ? 1 : 0);
+    luaL_propagate(L);
 
     int status = lua_resume(NL, nullptr, 0);
+    luaL_propagate(L);
     int results = status == LUA_OK ? lua_gettop(NL) : 1;
 
     lua_pushboolean(L, status == LUA_OK ? 1 : 0);
     lua_xmove(NL, L, results);
+    luaL_propagate(L);
     return results + 1;
 }
 
@@ -1664,10 +1822,12 @@ TEST_CASE("CoroutineHost")
                 L,
                 [](lua_State* L) -> int
                 {
-                    luaL_checktype(L, 1, LUA_TTHREAD);
+                    if (!luaL_requiretype(L, 1, LUA_TTHREAD))
+                        return LUA_RAISED;
                     lua_State* co = lua_tothread(L, 1);
 
                     int status = lua_resume(co, nullptr, 0);
+                    luaL_propagate(L);
 
                     if (status == LUA_YIELD || status == LUA_BREAK)
                         return 0;
@@ -1688,13 +1848,15 @@ TEST_CASE("CoroutineHost")
                 L,
                 [](lua_State* L) -> int
                 {
-                    luaL_checktype(L, 1, LUA_TTHREAD);
+                    if (!luaL_requiretype(L, 1, LUA_TTHREAD))
+                        return LUA_RAISED;
                     lua_State* co = lua_tothread(L, 1);
 
                     if (lua_hasfinalizers(co))
                         return runFinalizers(L, true);
 
                     lua_resetthread(co);
+                    luaL_propagate(L);
                     lua_pushboolean(L, true);
                     return 1;
                 },
@@ -1709,7 +1871,9 @@ TEST_CASE("CoroutineHost")
 
 static int cxxthrow(lua_State* L)
 {
-#if LUA_USE_LONGJMP
+#if LUAU_ERRORS_AS_RETURNS
+    return luaL_raiseerror(L, "oops");
+#elif LUA_USE_LONGJMP
     luaL_error(L, "oops");
 #else
     throw std::runtime_error("oops");
@@ -1769,7 +1933,9 @@ int singleYieldContinuation(lua_State* L, int status)
 int multipleYields(lua_State* L)
 {
     lua_settop(L, 1); // Only 1 argument expected
-    int base = luaL_checkinteger(L, 1);
+    int base;
+    if (!luaL_requireinteger(L, 1, &base))
+        return LUA_RAISED;
 
     // current state
     int pos = 1;
@@ -1783,10 +1949,15 @@ int multipleYields(lua_State* L)
 int multipleYieldsContinuation(lua_State* L, int status)
 {
     // function arguments are still alive
-    int base = luaL_checkinteger(L, 1);
+    int base;
+    if (!luaL_requireinteger(L, 1, &base))
+        return LUA_RAISED;
 
     // function state is still alive
-    int pos = luaL_checkinteger(L, 2) + 1;
+    int pos;
+    if (!luaL_requireinteger(L, 2, &pos))
+        return LUA_RAISED;
+    pos += 1;
     lua_pushinteger(L, pos);
     lua_replace(L, 2);
 
@@ -1804,7 +1975,9 @@ int multipleYieldsContinuation(lua_State* L, int status)
 
 int nestedMultipleYieldHelper(lua_State* L)
 {
-    int context = luaL_checkinteger(L, lua_upvalueindex(1));
+    int context;
+    if (!luaL_requireinteger(L, lua_upvalueindex(1), &context))
+        return LUA_RAISED;
 
     lua_pushinteger(L, 100 + context);
     return lua_yield(L, 1);
@@ -1812,14 +1985,18 @@ int nestedMultipleYieldHelper(lua_State* L)
 
 int nestedMultipleYieldHelperContinuation(lua_State* L, int status)
 {
-    int context = luaL_checkinteger(L, lua_upvalueindex(1));
+    int context;
+    if (!luaL_requireinteger(L, lua_upvalueindex(1), &context))
+        return LUA_RAISED;
     lua_pushinteger(L, 110 + context);
     return 1;
 }
 
 int nestedMultipleYieldHelperNonYielding(lua_State* L)
 {
-    int context = luaL_checkinteger(L, lua_upvalueindex(1));
+    int context;
+    if (!luaL_requireinteger(L, lua_upvalueindex(1), &context))
+        return LUA_RAISED;
     lua_pushinteger(L, 105 + context);
     return 1;
 }
@@ -1827,7 +2004,10 @@ int nestedMultipleYieldHelperNonYielding(lua_State* L)
 int multipleYieldsWithNestedCall(lua_State* L)
 {
     lua_settop(L, 2); // Only 2 arguments expected
-    bool nestedShouldYield = luaL_checkboolean(L, 2);
+    int nestedShouldYieldValue;
+    if (!luaL_requireboolean(L, 2, &nestedShouldYieldValue))
+        return LUA_RAISED;
+    bool nestedShouldYield = nestedShouldYieldValue != 0;
 
     lua_pushinteger(L, 0); // state
 
@@ -1842,7 +2022,9 @@ int multipleYieldsWithNestedCall(lua_State* L)
 
 int multipleYieldsWithNestedCallContinuation(lua_State* L, int status)
 {
-    int state = luaL_checkinteger(L, 3);
+    int state;
+    if (!luaL_requireinteger(L, 3, &state))
+        return LUA_RAISED;
     lua_pushinteger(L, state + 1);
     lua_replace(L, 3);
 
@@ -1852,12 +2034,18 @@ int multipleYieldsWithNestedCallContinuation(lua_State* L, int status)
     }
     else if (state == 1)
     {
-        lua_pushnumber(L, luaL_checkinteger(L, 1) + 200);
+        int value;
+        if (!luaL_requireinteger(L, 1, &value))
+            return LUA_RAISED;
+        lua_pushnumber(L, value + 200);
         return lua_yield(L, 1);
     }
     else
     {
-        lua_pushnumber(L, luaL_checkinteger(L, 1) + 210);
+        int value;
+        if (!luaL_requireinteger(L, 1, &value))
+            return LUA_RAISED;
+        lua_pushnumber(L, value + 210);
         return 1;
     }
 }
@@ -1913,7 +2101,8 @@ int passthroughCallArgReuseContinuation(lua_State* L, int status)
 
 int passthroughCallVaradic(lua_State* L)
 {
-    luaL_checkany(L, 1);
+    if (!luaL_requireany(L, 1))
+        return LUA_RAISED;
     return lua_callyieldable(L, lua_gettop(L) - 1, LUA_MULTRET);
 }
 
@@ -1924,7 +2113,8 @@ int passthroughCallVaradicContinuation(lua_State* L, int status)
 
 int passthroughCallWithState(lua_State* L)
 {
-    luaL_checkany(L, 1);
+    if (!luaL_requireany(L, 1))
+        return LUA_RAISED;
     int args = lua_gettop(L) - 1;
 
     lua_pushnumber(L, 42);
@@ -1935,17 +2125,20 @@ int passthroughCallWithState(lua_State* L)
 
 int passthroughCallWithStateContinuation(lua_State* L, int status)
 {
-    LUAU_ASSERT(luaL_checkinteger(L, 1) == 42);
+    LUAU_ASSERT(lua_tointeger(L, 1) == 42);
 
     return lua_gettop(L) - 1;
 }
 
 int pcallThenXCall(lua_State* L)
 {
-    luaL_checkany(L, 1);
-    luaL_checkany(L, 2);
+    if (!luaL_requireany(L, 1))
+        return LUA_RAISED;
+    if (!luaL_requireany(L, 2))
+        return LUA_RAISED;
 
-    luaL_checkstack(L, 3, "pcallThenCall");
+    if (!luaL_requirestack(L, 3, "pcallThenCall"))
+        return LUA_RAISED;
     lua_pushinteger(L, 0); // state
     lua_pushinteger(L, 0); // multiplier
 
@@ -1955,10 +2148,13 @@ int pcallThenXCall(lua_State* L)
 
 int pcallThenXCallContinuation(lua_State* L, int status)
 {
-    luaL_checkstack(L, 1, "pcallThenCallContinuation");
+    if (!luaL_requirestack(L, 1, "pcallThenCallContinuation"))
+        return LUA_RAISED;
 
     int pcallVariant = lua_tointeger(L, lua_upvalueindex(1));
-    int state = luaL_checkinteger(L, 3);
+    int state;
+    if (!luaL_requireinteger(L, 3, &state))
+        return LUA_RAISED;
 
     if (state == 0)
     {
@@ -1979,7 +2175,9 @@ int pcallThenXCallContinuation(lua_State* L, int status)
         return pcallVariant ? lua_pcallyieldable(L, 0, LUA_MULTRET, 0) : lua_callyieldable(L, 0, LUA_MULTRET);
     }
 
-    int multiplier = luaL_checkinteger(L, 4);
+    int multiplier;
+    if (!luaL_requireinteger(L, 4, &multiplier))
+        return LUA_RAISED;
     int value = -1;
 
     if (status != LUA_OK)
@@ -2123,6 +2321,7 @@ TEST_CASE("VectorLibrary")
     );
 }
 
+#if !LUAU_ERRORS_AS_RETURNS
 static void populateRTTI(lua_State* L, Luau::TypeId type)
 {
     if (auto p = Luau::get<Luau::PrimitiveType>(type))
@@ -2229,6 +2428,7 @@ TEST_CASE("Types")
         }
     );
 }
+#endif
 
 TEST_CASE("DateTime")
 {
@@ -2323,8 +2523,13 @@ TEST_CASE("Debugger")
                 L,
                 [](lua_State* L) -> int
                 {
-                    int line = luaL_checkinteger(L, 1);
-                    bool enabled = luaL_optboolean(L, 2, true);
+                    int line;
+                    if (!luaL_requireinteger(L, 1, &line))
+                        return LUA_RAISED;
+                    int enabledValue;
+                    if (!luaL_requireoptboolean(L, 2, true, &enabledValue))
+                        return LUA_RAISED;
+                    bool enabled = enabledValue != 0;
 
                     lua_Debug ar = {};
                     lua_getinfo(L, lua_stackdepth(L) - 1, "f", &ar);
@@ -2541,7 +2746,10 @@ fib(5)
                 return;
 
             if (step == target)
-                luaL_error(L, "test");
+            {
+                luaL_raiseerror(L, "test");
+                return;
+            }
 
             step++;
         };
@@ -2849,7 +3057,7 @@ static int cpcallTest(lua_State* L)
 
     if (shouldFail)
     {
-        luaL_error(L, "Failed");
+        return luaL_raiseerror(L, "Failed");
     }
     else
     {
@@ -2926,7 +3134,7 @@ TEST_CASE("ApiCalls")
         CHECK(lua_status(L) == LUA_OK);
 
         lua_getglobal(L, "cpcallvalue");
-        CHECK(luaL_checkinteger(L, -1) == 123);
+        CHECK(lua_tointeger(L, -1) == 123);
         lua_pop(L, 1);
     }
 
@@ -2947,7 +3155,7 @@ TEST_CASE("ApiCalls")
 
         CHECK(lua_gettop(L) == 0);
 
-        luaL_checkstack(L, LUAI_MAXCSTACK - 1, "must succeed");
+        REQUIRE(luaL_requirestack(L, LUAI_MAXCSTACK - 1, "must succeed"));
 
         for (int i = 0; i < LUAI_MAXCSTACK - 1; i++)
             lua_pushnumber(L, 1.0);
@@ -3166,6 +3374,7 @@ TEST_CASE("ApiAtoms")
     CHECK(a3 == -1);
 }
 
+#if !LUAU_ERRORS_AS_RETURNS
 static bool endsWith(const std::string& str, const std::string& suffix)
 {
     if (suffix.length() > str.length())
@@ -3173,6 +3382,7 @@ static bool endsWith(const std::string& str, const std::string& suffix)
 
     return suffix == std::string_view(str.c_str() + str.length() - suffix.length(), suffix.length());
 }
+#endif
 
 TEST_CASE("ApiType")
 {
@@ -3225,11 +3435,13 @@ TEST_CASE("ApiBuffer")
     CHECK(len == 1000);
     CHECK(p1 == p2);
 
-    void* p3 = luaL_checkbuffer(L, -1, nullptr);
+    void* p3 = nullptr;
+    REQUIRE(luaL_requirebuffer(L, -1, &p3, nullptr));
     CHECK(p1 == p3);
 
     len = 0;
-    void* p4 = luaL_checkbuffer(L, -1, &len);
+    void* p4 = nullptr;
+    REQUIRE(luaL_requirebuffer(L, -1, &p4, &len));
     CHECK(len == 1000);
     CHECK(p1 == p4);
 
@@ -3251,7 +3463,8 @@ int slowlyOverflowStack(lua_State* L)
 {
     for (int i = 0; i < LUAI_MAXCSTACK * 2; i++)
     {
-        luaL_checkstack(L, 1, "test");
+        if (!luaL_requirestack(L, 1, "test"))
+            return LUA_RAISED;
         lua_pushnumber(L, 1.0);
     }
 
@@ -3269,7 +3482,7 @@ TEST_CASE("ApiStack")
         lua_pushcfunction(L, slowlyOverflowStack, "foo");
         int result = lua_pcall(L, 0, 0, 0);
         REQUIRE(result == LUA_ERRRUN);
-        CHECK(strcmp(luaL_checkstring(L, -1), "stack overflow (test)") == 0);
+        CHECK(strcmp(lua_tostring(L, -1), "stack overflow (test)") == 0);
     }
 
     {
@@ -3429,7 +3642,7 @@ TEST_CASE("ApiEncode")
     }
 }
 
-#if !LUA_USE_LONGJMP
+#if !LUA_USE_LONGJMP && !LUAU_ERRORS_AS_RETURNS
 TEST_CASE("ExceptionObject")
 {
     struct ExceptionResult
@@ -3584,7 +3797,7 @@ TEST_CASE("Coverage")
                 L,
                 [](lua_State* L) -> int
                 {
-                    luaL_argexpected(L, lua_isLfunction(L, 1), 1, "function");
+                    luaL_argrequiretype(L, lua_isLfunction(L, 1), 1, "function");
 
                     lua_newtable(L);
                     lua_getcoverage(
@@ -3981,7 +4194,10 @@ TEST_CASE("Interrupt")
         index++;
 
         if (index >= 1'000)
-            luaL_error(L, "timeout");
+        {
+            luaL_raiseerror(L, "timeout");
+            return;
+        }
     };
 
     for (int test = 1; test <= 7; ++test)
@@ -3994,7 +4210,7 @@ TEST_CASE("Interrupt")
         index = 0;
         int status = lua_resume(T, nullptr, 0);
         CHECK(status == LUA_ERRRUN);
-        CHECK(strstr(luaL_checkstring(T, -1), "timeout") != nullptr);
+        CHECK(strstr(lua_tostring(T, -1), "timeout") != nullptr);
 
         lua_pop(L, 1);
     }
@@ -4009,7 +4225,8 @@ TEST_CASE("Interrupt")
         if (index == 1'000)
         {
             index = 0;
-            luaL_error(L, "timeout");
+            luaL_raiseerror(L, "timeout");
+            return;
         }
     };
 
@@ -4108,8 +4325,11 @@ TEST_CASE("UserdataApi")
     luaL_getmetatable(L, "udata2");
     lua_setmetatable(L, -2);
 
-    CHECK(luaL_checkudata(L, -2, "udata1") == ud5);
-    CHECK(luaL_checkudata(L, -1, "udata2") == ud6);
+    void* checked = nullptr;
+    REQUIRE(luaL_requireudata(L, -2, "udata1", &checked));
+    CHECK(checked == ud5);
+    REQUIRE(luaL_requireudata(L, -1, "udata2", &checked));
+    CHECK(checked == ud6);
 
     // tagged user data with fast metatable access
     luaL_newmetatable(L, "udata3");
@@ -4126,8 +4346,10 @@ TEST_CASE("UserdataApi")
 
     void* ud8 = lua_newuserdatataggedwithmetatable(L, 16, 51);
 
-    CHECK(luaL_checkudata(L, -2, "udata3") == ud7);
-    CHECK(luaL_checkudata(L, -1, "udata4") == ud8);
+    REQUIRE(luaL_requireudata(L, -2, "udata3", &checked));
+    CHECK(checked == ud7);
+    REQUIRE(luaL_requireudata(L, -1, "udata4", &checked));
+    CHECK(checked == ud8);
 
     globalState.reset();
 
@@ -4431,7 +4653,9 @@ TEST_CASE("DebugApi")
 
 static int cYieldingIteratorContinuation(lua_State* L, int status)
 {
-    int index = luaL_checkinteger(L, 2);
+    int index;
+    if (!luaL_requireinteger(L, 2, &index))
+        return LUA_RAISED;
     lua_pushinteger(L, index + 1);
     lua_pushinteger(L, index + 1);
     return 2;
@@ -4439,8 +4663,12 @@ static int cYieldingIteratorContinuation(lua_State* L, int status)
 
 static int cYieldingIterator(lua_State* L)
 {
-    int max = luaL_checkinteger(L, 1);
-    int index = luaL_checkinteger(L, 2);
+    int max;
+    if (!luaL_requireinteger(L, 1, &max))
+        return LUA_RAISED;
+    int index;
+    if (!luaL_requireinteger(L, 2, &index))
+        return LUA_RAISED;
 
     if (index >= max)
         return 0; // nil: end iteration
@@ -4470,20 +4698,29 @@ TEST_CASE("IterFenv")
 
 const int kInt64Tag = 1;
 
-static int64_t getInt64(lua_State* L, int idx)
+static bool getInt64(lua_State* L, int idx, int64_t* out)
 {
     if (void* p = lua_touserdatatagged(L, idx, kInt64Tag))
-        return *static_cast<int64_t*>(p);
+    {
+        *out = *static_cast<int64_t*>(p);
+        return true;
+    }
 
     if (lua_isnumber(L, idx))
-        return lua_tointeger(L, idx);
+    {
+        *out = lua_tointeger(L, idx);
+        return true;
+    }
 
-    luaL_typeerror(L, 1, "int64");
+    luaL_raisetypeerror(L, 1, "int64");
+    return false;
 }
 
 static void pushInt64(lua_State* L, int64_t value)
 {
     void* p = lua_newuserdatatagged(L, sizeof(int64_t), kInt64Tag);
+    if (!p)
+        return;
 
     luaL_getmetatable(L, "int64");
     lua_setmetatable(L, -2);
@@ -4508,8 +4745,12 @@ TEST_CASE("Userdata")
                 L,
                 [](lua_State* L)
                 {
-                    void* p = luaL_checkudatatagged(L, 1, kInt64Tag);
-                    const char* name = luaL_checkstring(L, 2);
+                    void* p;
+                    if (!luaL_requireudatatagged(L, 1, kInt64Tag, &p))
+                        return LUA_RAISED;
+                    const char* name;
+                    if (!luaL_requirestring(L, 2, &name))
+                        return LUA_RAISED;
 
                     if (strcmp(name, "value") == 0)
                     {
@@ -4517,7 +4758,7 @@ TEST_CASE("Userdata")
                         return 1;
                     }
 
-                    luaL_error(L, "unknown field %s", name);
+                    return luaL_raiseerror(L, "unknown field %s", name);
                 },
                 nullptr
             );
@@ -4528,17 +4769,23 @@ TEST_CASE("Userdata")
                 L,
                 [](lua_State* L)
                 {
-                    void* p = luaL_checkudatatagged(L, 1, kInt64Tag);
-                    const char* name = luaL_checkstring(L, 2);
+                    void* p;
+                    if (!luaL_requireudatatagged(L, 1, kInt64Tag, &p))
+                        return LUA_RAISED;
+                    const char* name;
+                    if (!luaL_requirestring(L, 2, &name))
+                        return LUA_RAISED;
 
                     if (strcmp(name, "value") == 0)
                     {
-                        double value = luaL_checknumber(L, 3);
+                        double value;
+                        if (!luaL_requirenumber(L, 3, &value))
+                            return LUA_RAISED;
                         *static_cast<int64_t*>(p) = int64_t(value);
                         return 0;
                     }
 
-                    luaL_error(L, "unknown field %s", name);
+                    return luaL_raiseerror(L, "unknown field %s", name);
                 },
                 nullptr
             );
@@ -4549,7 +4796,11 @@ TEST_CASE("Userdata")
                 L,
                 [](lua_State* L)
                 {
-                    lua_pushboolean(L, getInt64(L, 1) == getInt64(L, 2));
+                    int64_t a;
+                    int64_t b;
+                    if (!getInt64(L, 1, &a) || !getInt64(L, 2, &b))
+                        return LUA_RAISED;
+                    lua_pushboolean(L, a == b);
                     return 1;
                 },
                 nullptr
@@ -4561,7 +4812,11 @@ TEST_CASE("Userdata")
                 L,
                 [](lua_State* L)
                 {
-                    lua_pushboolean(L, getInt64(L, 1) < getInt64(L, 2));
+                    int64_t a;
+                    int64_t b;
+                    if (!getInt64(L, 1, &a) || !getInt64(L, 2, &b))
+                        return LUA_RAISED;
+                    lua_pushboolean(L, a < b);
                     return 1;
                 },
                 nullptr
@@ -4573,7 +4828,11 @@ TEST_CASE("Userdata")
                 L,
                 [](lua_State* L)
                 {
-                    lua_pushboolean(L, getInt64(L, 1) <= getInt64(L, 2));
+                    int64_t a;
+                    int64_t b;
+                    if (!getInt64(L, 1, &a) || !getInt64(L, 2, &b))
+                        return LUA_RAISED;
+                    lua_pushboolean(L, a <= b);
                     return 1;
                 },
                 nullptr
@@ -4585,7 +4844,11 @@ TEST_CASE("Userdata")
                 L,
                 [](lua_State* L)
                 {
-                    pushInt64(L, getInt64(L, 1) + getInt64(L, 2));
+                    int64_t a;
+                    int64_t b;
+                    if (!getInt64(L, 1, &a) || !getInt64(L, 2, &b))
+                        return LUA_RAISED;
+                    pushInt64(L, a + b);
                     return 1;
                 },
                 nullptr
@@ -4597,7 +4860,11 @@ TEST_CASE("Userdata")
                 L,
                 [](lua_State* L)
                 {
-                    pushInt64(L, getInt64(L, 1) - getInt64(L, 2));
+                    int64_t a;
+                    int64_t b;
+                    if (!getInt64(L, 1, &a) || !getInt64(L, 2, &b))
+                        return LUA_RAISED;
+                    pushInt64(L, a - b);
                     return 1;
                 },
                 nullptr
@@ -4609,7 +4876,11 @@ TEST_CASE("Userdata")
                 L,
                 [](lua_State* L)
                 {
-                    pushInt64(L, getInt64(L, 1) * getInt64(L, 2));
+                    int64_t a;
+                    int64_t b;
+                    if (!getInt64(L, 1, &a) || !getInt64(L, 2, &b))
+                        return LUA_RAISED;
+                    pushInt64(L, a * b);
                     return 1;
                 },
                 nullptr
@@ -4622,7 +4893,11 @@ TEST_CASE("Userdata")
                 [](lua_State* L)
                 {
                     // ideally we'd guard against 0 but it's a test so eh
-                    pushInt64(L, getInt64(L, 1) / getInt64(L, 2));
+                    int64_t a;
+                    int64_t b;
+                    if (!getInt64(L, 1, &a) || !getInt64(L, 2, &b))
+                        return LUA_RAISED;
+                    pushInt64(L, a / b);
                     return 1;
                 },
                 nullptr
@@ -4637,7 +4912,11 @@ TEST_CASE("Userdata")
                     // for testing we use different semantics here compared to __div: __idiv rounds to negative inf, __div truncates (rounds to zero)
                     // additionally, division loses precision here outside of 2^53 range
                     // we do not necessarily recommend this behavior in production code!
-                    pushInt64(L, int64_t(floor(double(getInt64(L, 1)) / double(getInt64(L, 2)))));
+                    int64_t a;
+                    int64_t b;
+                    if (!getInt64(L, 1, &a) || !getInt64(L, 2, &b))
+                        return LUA_RAISED;
+                    pushInt64(L, int64_t(floor(double(a) / double(b))));
                     return 1;
                 },
                 nullptr
@@ -4650,7 +4929,11 @@ TEST_CASE("Userdata")
                 [](lua_State* L)
                 {
                     // ideally we'd guard against 0 and INT64_MIN but it's a test so eh
-                    pushInt64(L, getInt64(L, 1) % getInt64(L, 2));
+                    int64_t a;
+                    int64_t b;
+                    if (!getInt64(L, 1, &a) || !getInt64(L, 2, &b))
+                        return LUA_RAISED;
+                    pushInt64(L, a % b);
                     return 1;
                 },
                 nullptr
@@ -4662,7 +4945,11 @@ TEST_CASE("Userdata")
                 L,
                 [](lua_State* L)
                 {
-                    pushInt64(L, int64_t(pow(double(getInt64(L, 1)), double(getInt64(L, 2)))));
+                    int64_t a;
+                    int64_t b;
+                    if (!getInt64(L, 1, &a) || !getInt64(L, 2, &b))
+                        return LUA_RAISED;
+                    pushInt64(L, int64_t(pow(double(a), double(b))));
                     return 1;
                 },
                 nullptr
@@ -4674,7 +4961,10 @@ TEST_CASE("Userdata")
                 L,
                 [](lua_State* L)
                 {
-                    pushInt64(L, -getInt64(L, 1));
+                    int64_t a;
+                    if (!getInt64(L, 1, &a))
+                        return LUA_RAISED;
+                    pushInt64(L, -a);
                     return 1;
                 },
                 nullptr
@@ -4686,7 +4976,9 @@ TEST_CASE("Userdata")
                 L,
                 [](lua_State* L)
                 {
-                    int64_t value = getInt64(L, 1);
+                    int64_t value;
+                    if (!getInt64(L, 1, &value))
+                        return LUA_RAISED;
                     std::string str = std::to_string(value);
                     lua_pushlstring(L, str.c_str(), str.length());
                     return 1;
@@ -4700,7 +4992,9 @@ TEST_CASE("Userdata")
                 L,
                 [](lua_State* L)
                 {
-                    double v = luaL_checknumber(L, 1);
+                    double v;
+                    if (!luaL_requirenumber(L, 1, &v))
+                        return LUA_RAISED;
                     pushInt64(L, int64_t(v));
                     return 1;
                 },
