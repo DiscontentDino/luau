@@ -8,11 +8,14 @@
 #include "lmem.h"
 #include "ltable.h"
 #include "lvm.h"
+#include "lapi.h"
 
 #if LUA_USE_LONGJMP
 #include <setjmp.h>
 #include <stdlib.h>
-#elif !LUAU_ERRORS_AS_RETURNS
+#elif LUAU_ERRORS_AS_RETURNS
+#include <stdlib.h>
+#else
 #include <stdexcept>
 #endif
 
@@ -33,21 +36,33 @@ LUAU_FASTFLAGVARIABLE(LuauPcallErrorContinuationReentry)
 #if LUAU_ERRORS_AS_RETURNS
 int luaD_rawrunprotected(lua_State* L, Pfunc f, void* ud)
 {
-    LUAU_ASSERT(L->global->errcode == 0);
+    global_State* g = L->global;
+    LUAU_ASSERT(g->errcode == 0);
 
+    g->protecteddepth++;
     f(L, ud);
+    g->protecteddepth--;
 
-    int status = L->global->errcode;
-    L->global->errcode = 0;
+    int status = g->errcode;
+    g->errcode = 0;
     return status;
 }
 
 void luaD_seterror(lua_State* L, int errcode)
 {
-    LUAU_ASSERT(L->global->errcode == 0);
+    global_State* g = L->global;
+    LUAU_ASSERT(g->errcode == 0);
     LUAU_ASSERT(errcode != 0);
 
-    L->global->errcode = errcode;
+    if (g->protecteddepth == 0)
+    {
+        if (g->cb.panic)
+            g->cb.panic(L, errcode);
+
+        abort();
+    }
+
+    g->errcode = errcode;
 }
 #elif LUA_USE_LONGJMP
 struct lua_jmpbuf
@@ -578,6 +593,7 @@ static void resume_continue(lua_State* L, ptrdiff_t basecioffset)
             if (L->status == SCHEDULED_REENTRY)
                 continue;
 
+            LUAU_ASSERT(n >= 0);
             luau_poscall(L, L->top - n);
         }
         else
@@ -776,6 +792,8 @@ static void resume_handle(lua_State* L, void* ud)
     if (L->status != LUA_OK)
         return;
 
+    LUAU_ASSERT(n >= 0);
+
     // finish cont call and restore stack to previous ci top
     luau_poscall(L, L->top - n);
 
@@ -867,6 +885,7 @@ static int resume_finish(lua_State* L, int status, int oldnCcalls)
 // pop always executes.
 int lua_resume(lua_State* L, lua_State* from, int nargs)
 {
+    api_checknoerror(L);
     if (int starterror = resume_start(L, from, nargs))
         return starterror;
 
@@ -887,6 +906,7 @@ int lua_resume(lua_State* L, lua_State* from, int nargs)
 
 int lua_resumeerror(lua_State* L, lua_State* from)
 {
+    api_checknoerror(L);
     if (int starterror = resume_start(L, from, 1))
         return starterror;
 
@@ -913,6 +933,7 @@ int lua_resumeerror(lua_State* L, lua_State* from)
 
 int lua_yield(lua_State* L, int nresults)
 {
+    api_checknoerror(L);
     api_check(L, nresults >= 0);
     api_check(L, nresults <= L->top - L->base);
 
@@ -925,6 +946,7 @@ int lua_yield(lua_State* L, int nresults)
 
 int lua_break(lua_State* L)
 {
+    api_checknoerror(L);
     if (L->nCcalls > L->baseCcalls)
         luaG_raiserunerror(L, LUA_RAISED, "attempt to break across metamethod/C-call boundary");
     L->status = LUA_BREAK;
@@ -933,6 +955,7 @@ int lua_break(lua_State* L)
 
 int lua_isyieldable(lua_State* L)
 {
+    api_checknoerror(L);
     return (L->nCcalls <= L->baseCcalls);
 }
 

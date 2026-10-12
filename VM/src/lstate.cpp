@@ -316,6 +316,7 @@ lua_State* lua_newstate(lua_Alloc allocator, void* ud)
         g->errorjmp = NULL;
 #if LUAU_ERRORS_AS_RETURNS
         g->errcode = 0;
+        g->protecteddepth = 0;
 #endif
         g->rngstate = 0;
         g->ptrenckey[0] = 1;

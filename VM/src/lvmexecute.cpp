@@ -1145,7 +1145,10 @@ reentry:
 
                     // yield
                     if (n < 0)
+                    {
+                        LUAU_ASSERT(isyielded(L));
                         goto exit;
+                    }
 
                     // ci is our callinfo, cip is our parent
                     CallInfo* ci = L->ci;
@@ -1261,7 +1264,10 @@ reentry:
 
                     // yield
                     if (n < 0)
+                    {
+                        LUAU_ASSERT(isyielded(L));
                         goto exit;
+                    }
 
                     // ci is our callinfo, cip is our parent
                     CallInfo* ci = L->ci;
@@ -3669,7 +3675,10 @@ reentry:
 
                         // yield
                         if (results < 0)
+                        {
+                            LUAU_ASSERT(isyielded(L));
                             return;
+                        }
 
                         // ci is our callinfo, cip is our parent
                         CallInfo* ci = L->ci;
@@ -3998,7 +4007,10 @@ int luau_precall(lua_State* L, StkId func, int nresults)
 
         // yield
         if (n < 0)
+        {
+            LUAU_ASSERT(isyielded(L));
             return PCRYIELD;
+        }
 
         // ci is our callinfo, cip is our parent
         CallInfo* ci = L->ci;

@@ -878,6 +878,7 @@ static int loadsafe(
 
 int luau_load(lua_State* L, const char* chunkname, const char* data, size_t size, int env)
 {
+    api_checknoerror(L);
     // we will allocate a fair amount of memory so check GC before we do
     luaC_checkGC(L);
 

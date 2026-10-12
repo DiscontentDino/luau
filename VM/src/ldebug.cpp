@@ -32,6 +32,7 @@ static Proto* getluaproto(CallInfo* ci)
 
 int lua_getargument(lua_State* L, int level, int n)
 {
+    api_checknoerror(L);
     if (unsigned(level) >= unsigned(L->ci - L->base_ci))
         return 0;
 
@@ -64,6 +65,7 @@ int lua_getargument(lua_State* L, int level, int n)
 
 const char* lua_getlocal(lua_State* L, int level, int n)
 {
+    api_checknoerror(L);
     if (unsigned(level) >= unsigned(L->ci - L->base_ci))
         return NULL;
 
@@ -85,6 +87,7 @@ const char* lua_getlocal(lua_State* L, int level, int n)
 
 const char* lua_setlocal(lua_State* L, int level, int n)
 {
+    api_checknoerror(L);
     api_check(L, L->top - L->base >= 1);
 
     if (unsigned(level) >= unsigned(L->ci - L->base_ci))
@@ -195,6 +198,7 @@ static Closure* auxgetinfo(lua_State* L, const char* what, lua_Debug* ar, Closur
 
 void lua_callhook(lua_State* L, lua_Hook hook, void* userdata)
 {
+    api_checknoerror(L);
     api_check(L, hook != nullptr);
     api_check(L, L->ci != L->base_ci);
 
@@ -203,11 +207,13 @@ void lua_callhook(lua_State* L, lua_Hook hook, void* userdata)
 
 int lua_stackdepth(lua_State* L)
 {
+    api_checknoerror(L);
     return int(L->ci - L->base_ci);
 }
 
 int lua_getinfo(lua_State* L, int level, const char* what, lua_Debug* ar)
 {
+    api_checknoerror(L);
     Closure* f = NULL;
     CallInfo* ci = NULL;
     if (level < 0)
@@ -567,6 +573,7 @@ int luaG_hasnative(lua_State* L, int level)
 
 void lua_singlestep(lua_State* L, int enabled)
 {
+    api_checknoerror(L);
     L->singlestep = bool(enabled);
 }
 
@@ -628,6 +635,7 @@ static int getnextline(Proto* p, int line)
 
 int lua_breakpoint(lua_State* L, int funcindex, int line, int enabled)
 {
+    api_checknoerror(L);
     const TValue* func = luaA_toobject(L, funcindex);
     api_check(L, ttisfunction(func) && !clvalue(func)->isC);
 
@@ -644,6 +652,7 @@ int lua_breakpoint(lua_State* L, int funcindex, int line, int enabled)
 
 int lua_atbreakpoint(lua_State* L)
 {
+    api_checknoerror(L);
     return luaG_onbreak(L) ? 1 : 0;
 }
 
@@ -675,6 +684,7 @@ static void getcoverage(Proto* p, int depth, int* buffer, size_t size, void* con
 
 void lua_getcoverage(lua_State* L, int funcindex, void* context, lua_Coverage callback)
 {
+    api_checknoerror(L);
     const TValue* func = luaA_toobject(L, funcindex);
     api_check(L, ttisfunction(func) && !clvalue(func)->isC);
 
@@ -733,6 +743,7 @@ static void getcounters(lua_State* L, Proto* p, void* context, lua_CounterFuncti
 
 void lua_getcounters(lua_State* L, int funcindex, void* context, lua_CounterFunction functionvisit, lua_CounterValue countervisit)
 {
+    api_checknoerror(L);
     const TValue* func = luaA_toobject(L, funcindex);
     api_check(L, ttisfunction(func) && !clvalue(func)->isC);
 
@@ -754,6 +765,7 @@ static size_t append(char* buf, size_t bufsize, size_t offset, const char* data)
 
 const char* lua_debugtrace(lua_State* L)
 {
+    api_checknoerror(L);
     static char buf[4096];
 
     const int limit1 = 10;

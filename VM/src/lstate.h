@@ -235,6 +235,7 @@ typedef struct global_State
 
 #if LUAU_ERRORS_AS_RETURNS
     int errcode;
+    int protecteddepth;
 #endif
 
     uint64_t rngstate; // PCG random number generator state

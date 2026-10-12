@@ -2882,6 +2882,7 @@ TEST_CASE("NewUserdataOverflow")
         {
             // The following userdata request might cause an overflow.
             lua_newuserdatadtor(L1, SIZE_MAX, [](lua_State*, void* d) {});
+            luaL_propagate(L1);
             // The overflow might segfault in the following call.
             lua_getmetatable(L1, -1);
             return 0;
@@ -2892,6 +2893,29 @@ TEST_CASE("NewUserdataOverflow")
     CHECK(lua_pcall(L, 0, 0, 0) == LUA_ERRRUN);
     CHECK(strcmp(lua_tostring(L, -1), "memory allocation error: block too big") == 0);
 }
+
+#if LUAU_ERRORS_AS_RETURNS
+TEST_CASE("UnprotectedErrorCallsPanic")
+{
+    StateRef globalState(luaL_newstate(), lua_close);
+    lua_State* L = globalState.get();
+
+    static int panicstatus = 0;
+    lua_callbacks(L)->panic = [](lua_State* L, int errcode)
+    {
+        panicstatus = errcode;
+        throw std::runtime_error("panic");
+    };
+
+    lua_pushstring(L, "oops");
+    CHECK_THROWS(lua_raiseerror(L));
+    CHECK(panicstatus == LUA_ERRRUN);
+    CHECK(lua_haserror(L) == 0);
+
+    lua_pushstring(L, "return 1");
+    CHECK(lua_pcall(L, 0, 0, 0) == LUA_ERRRUN);
+}
+#endif
 
 TEST_CASE("SandboxWithoutLibs")
 {
