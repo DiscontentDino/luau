@@ -104,6 +104,7 @@ void luaV_getimport(lua_State* L, LuaTable* env, TValue* k, StkId res, uint32_t 
     TValue g;
     sethvalue(L, &g, env);
     luaV_gettable(L, &g, &k[id0], res);
+    luaD_propagate(L);
 
     // table lookup for id1
     if (count < 2)
@@ -111,7 +112,10 @@ void luaV_getimport(lua_State* L, LuaTable* env, TValue* k, StkId res, uint32_t 
 
     res = restorestack(L, resp);
     if (!propagatenil || !ttisnil(res))
+    {
         luaV_gettable(L, res, &k[id1], res);
+        luaD_propagate(L);
+    }
 
     // table lookup for id2
     if (count < 3)
@@ -189,6 +193,7 @@ static void resolveImportSafe(lua_State* L, LuaTable* env, TValue* k, uint32_t i
             // injection
             // allocate a stack slot so that we can do table lookups
             luaD_checkstack(L, 1);
+            luaD_propagate(L);
             setnilvalue(L->top);
             L->top++;
 
@@ -202,6 +207,7 @@ static void resolveImportSafe(lua_State* L, LuaTable* env, TValue* k, uint32_t i
         // luaD_pcall will make sure that if any C/Lua calls during import resolution fail, the thread state is restored back
         int oldTop = lua_gettop(L);
         int status = luaD_pcall(L, &ResolveImport::run, &ri, savestack(L, L->top), 0);
+        luaD_propagate(L);
         LUAU_ASSERT(oldTop + 1 == lua_gettop(L)); // if an error occurred, luaD_pcall saves it on stack
 
         if (status != 0)
@@ -328,6 +334,7 @@ static int loadsafe(
         char chunkbuf[LUA_IDSIZE];
         const char* chunkid = luaO_chunkid(chunkbuf, sizeof(chunkbuf), chunkname, strlen(chunkname));
         lua_pushfstring(L, "%s%.*s", chunkid, int(size - offset), data + offset);
+        luaD_propagate(L, 1);
         return 1;
     }
 
@@ -336,6 +343,7 @@ static int loadsafe(
         char chunkbuf[LUA_IDSIZE];
         const char* chunkid = luaO_chunkid(chunkbuf, sizeof(chunkbuf), chunkname, strlen(chunkname));
         lua_pushfstring(L, "%s: bytecode version mismatch (expected [%d..%d], got %d)", chunkid, LBC_VERSION_MIN, LBC_VERSION_MAX, version);
+        luaD_propagate(L, 1);
         return 1;
     }
 
@@ -352,6 +360,7 @@ static int loadsafe(
             lua_pushfstring(
                 L, "%s: bytecode type version mismatch (expected [%d..%d], got %d)", chunkid, LBC_TYPE_VERSION_MIN, LBC_TYPE_VERSION_MAX, typesversion
             );
+            luaD_propagate(L, 1);
             return 1;
         }
     }
@@ -360,16 +369,19 @@ static int loadsafe(
     LuaTable* envt = (env == 0) ? L->gt : hvalue(luaA_toobject(L, env));
 
     TString* source = luaS_new(L, chunkname);
+    luaD_propagate(L, 1);
 
     // string table
     unsigned int stringCount = readVarInt(data, size, offset);
     strings.allocate(L, stringCount);
+    luaD_propagate(L, 1);
 
     for (unsigned int i = 0; i < stringCount; ++i)
     {
         unsigned int length = readVarInt(data, size, offset);
 
         strings[i] = luaS_newlstr(L, data + offset, length);
+        luaD_propagate(L, 1);
         offset += length;
     }
 
@@ -401,6 +413,7 @@ static int loadsafe(
     // proto table
     unsigned int protoCount = readVarInt(data, size, offset);
     protos.allocate(L, protoCount);
+    luaD_propagate(L, 1);
 
     for (unsigned int i = 0; i < protoCount; ++i)
     {
@@ -409,6 +422,7 @@ static int loadsafe(
             protoSize = readVarInt(data, size, offset);
         size_t protoStartOffset = offset;
         Proto* p = luaF_newproto(L);
+        luaD_propagate(L, 1);
         p->source = source;
         p->bytecodeid = int(i);
         p->funid = L->global->lastprotoid == 0 ? 0 : L->global->lastprotoid++;
@@ -438,6 +452,7 @@ static int loadsafe(
                     int headersize = typesize > 127 ? 4 : 3;
 
                     p->typeinfo = luaM_newarray(L, headersize + typesize, uint8_t, p->memcat);
+                    luaD_propagate(L, 1);
                     p->sizetypeinfo = headersize + typesize;
 
                     if (headersize == 4)
@@ -468,6 +483,7 @@ static int loadsafe(
                     uint8_t* types = (uint8_t*)data + offset;
 
                     p->typeinfo = luaM_newarray(L, typesize, uint8_t, p->memcat);
+                    luaD_propagate(L, 1);
                     p->sizetypeinfo = typesize;
                     memcpy(p->typeinfo, types, typesize);
                     offset += typesize;
@@ -482,6 +498,7 @@ static int loadsafe(
 
         const int sizecode = readVarInt(data, size, offset);
         p->code = luaM_newarray(L, sizecode, Instruction, p->memcat);
+        luaD_propagate(L, 1);
         p->sizecode = sizecode;
 
         for (int j = 0; j < p->sizecode; ++j)
@@ -491,6 +508,7 @@ static int loadsafe(
 
         const int sizek = readVarInt(data, size, offset);
         p->k = luaM_newarray(L, sizek, TValue, p->memcat);
+        luaD_propagate(L, 1);
         p->sizek = sizek;
 
         // Initialize the constants to nil to ensure they have a valid state
@@ -556,6 +574,7 @@ static int loadsafe(
             {
                 uint32_t iid = read<uint32_t>(data, size, offset);
                 resolveImportSafe(L, envt, p->k, iid);
+                luaD_propagate(L, 1);
                 setobj(L, &p->k[j], L->top - 1);
                 L->top--;
                 break;
@@ -565,10 +584,12 @@ static int loadsafe(
             {
                 int keys = readVarInt(data, size, offset);
                 LuaTable* h = luaH_new(L, 0, keys);
+                luaD_propagate(L, 1);
                 for (int i = 0; i < keys; ++i)
                 {
                     int key = readVarInt(data, size, offset);
                     TValue* val = luaH_set(L, h, &p->k[key]);
+                    luaD_propagate(L, 1);
                     setnvalue(val, 0.0);
                 }
                 sethvalue(L, &p->k[j], h);
@@ -579,15 +600,18 @@ static int loadsafe(
             {
                 uint32_t keys = readVarInt(data, size, offset);
                 LuaTable* h = luaH_new(L, 0, keys);
+                luaD_propagate(L, 1);
 
                 TempBuffer<int32_t> nilKeys;
                 nilKeys.allocate(L, keys);
+                luaD_propagate(L, 1);
                 size_t nilKeysSize = 0;
 
                 for (uint32_t i = 0; i < keys; ++i)
                 {
                     int32_t key = readVarInt(data, size, offset);
                     TValue* val = luaH_set(L, h, &p->k[key]);
+                    luaD_propagate(L, 1);
                     int32_t constantIdx = read<int32_t>(data, size, offset);
                     if (constantIdx >= 0)
                     {
@@ -610,6 +634,7 @@ static int loadsafe(
                 {
                     int32_t key = nilKeys[idx];
                     TValue* val = luaH_set(L, h, &p->k[key]);
+                    luaD_propagate(L, 1);
                     setnilvalue(val);
                 }
 
@@ -621,6 +646,7 @@ static int loadsafe(
             {
                 uint32_t fid = readVarInt(data, size, offset);
                 Closure* cl = luaF_newLclosure(L, protos[fid]->nups, envt, protos[fid]);
+                luaD_propagate(L, 1);
                 cl->preload = (cl->nupvalues > 0);
                 setclvalue(L, &p->k[j], cl);
                 break;
@@ -635,7 +661,9 @@ static int loadsafe(
                 uint32_t numMethods = readVarInt(data, size, offset);
                 uint32_t numMembers = numMethods + numProperties;
                 TString** offsetToMember = luaM_newarray(L, numMembers, TString*, L->activememcat);
+                luaD_propagate(L, 1);
                 LuaTable* membersToOffset = luaH_new(L, 0, numMembers);
+                luaD_propagate(L, 1);
 
                 for (uint32_t idx = 0; idx < numMembers; idx++)
                 {
@@ -644,12 +672,14 @@ static int loadsafe(
                     LUAU_ASSERT(ttisstring(memberName));
                     offsetToMember[idx] = tsvalue(memberName);
                     TValue* val = luaH_setstr(L, membersToOffset, tsvalue(memberName));
+                    luaD_propagate(L, 1);
                     setnvalue(val, idx);
                 }
 
                 membersToOffset->readonly = true;
 
                 LuauClass* lco = luaR_newclass(L, tsvalue(classname), membersToOffset, offsetToMember, numProperties, numMethods, envt);
+                luaD_propagate(L, 1);
                 setclassvalue(L, &p->k[j], lco);
                 break;
             }
@@ -708,6 +738,7 @@ static int loadsafe(
 
         const int sizep = readVarInt(data, size, offset);
         p->p = luaM_newarray(L, sizep, Proto*, p->memcat);
+        luaD_propagate(L, 1);
         p->sizep = sizep;
 
         for (int j = 0; j < p->sizep; ++j)
@@ -730,6 +761,7 @@ static int loadsafe(
 
             const int sizelineinfo = absoffset + intervals * sizeof(int);
             p->lineinfo = luaM_newarray(L, sizelineinfo, uint8_t, p->memcat);
+            luaD_propagate(L, 1);
             p->sizelineinfo = sizelineinfo;
 
             p->abslineinfo = (int*)(p->lineinfo + absoffset);
@@ -755,6 +787,7 @@ static int loadsafe(
         {
             const int sizelocvars = readVarInt(data, size, offset);
             p->locvars = luaM_newarray(L, sizelocvars, LocVar, p->memcat);
+            luaD_propagate(L, 1);
             p->sizelocvars = sizelocvars;
 
             for (int j = 0; j < p->sizelocvars; ++j)
@@ -769,6 +802,7 @@ static int loadsafe(
             LUAU_ASSERT(sizeupvalues == p->nups);
 
             p->upvalues = luaM_newarray(L, sizeupvalues, TString*, p->memcat);
+            luaD_propagate(L, 1);
             p->sizeupvalues = sizeupvalues;
 
             for (int j = 0; j < p->sizeupvalues; ++j)
@@ -784,6 +818,7 @@ static int loadsafe(
             if (p->feedbackvecsize > 0)
             {
                 p->feedbackvec = luaM_newarray(L, p->feedbackvecsize, FeedbackVectorSlot, p->memcat);
+                luaD_propagate(L, 1);
             }
             for (uint32_t j = 0; j < p->feedbackvecsize; j++)
             {
@@ -833,8 +868,10 @@ static int loadsafe(
     luaC_threadbarrier(L);
 
     Closure* cl = luaF_newLclosure(L, 0, envt, main);
+    luaD_propagate(L, 1);
     setclvalue(L, L->top, cl);
     incr_top(L);
+    luaD_propagate(L, 1);
 
     return 0;
 }

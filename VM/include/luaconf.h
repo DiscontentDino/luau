@@ -157,6 +157,10 @@
 #define LUA_VECTOR_DOUBLE 0
 #endif
 
+#if LUAU_ERRORS_AS_RETURNS && LUA_VECTOR_DOUBLE
+#error "LUAU_ERRORS_AS_RETURNS does not support LUA_VECTOR_DOUBLE"
+#endif
+
 #if LUA_VECTOR_DOUBLE == 1
 #define LUA_VECTOR_TYPE double
 #else

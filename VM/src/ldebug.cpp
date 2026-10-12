@@ -238,6 +238,7 @@ int lua_getinfo(lua_State* L, int level, const char* what, lua_Debug* ar)
             luaC_threadbarrier(L);
             setclvalue(L, L->top, fcl);
             incr_top(L);
+            luaD_propagate(L, 0);
         }
     }
     return f ? 1 : 0;
@@ -490,6 +491,7 @@ void luaG_breakpoint(lua_State* L, Proto* p, int line, bool enable)
             if (!p->debuginsn)
             {
                 p->debuginsn = luaM_newarray(L, p->sizecode, uint8_t, p->memcat);
+                luaD_propagate(L);
                 for (int j = 0; j < p->sizecode; ++j)
                     p->debuginsn[j] = LUAU_INSN_OP(p->code[j]);
             }
@@ -683,6 +685,7 @@ void lua_getcoverage(lua_State* L, int funcindex, void* context, lua_Coverage ca
         return;
 
     int* buffer = luaM_newarray(L, size, int, 0);
+    luaD_propagate(L);
 
     getcoverage(p, 0, buffer, size, context, callback);
 
