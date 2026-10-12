@@ -4,9 +4,15 @@
 
 #include "lua.h"
 
+#if LUAU_ERRORS_AS_RETURNS
+#define luaL_raiseerror(L, fmt, ...) luaL_raiseerrorL(L, fmt, ##__VA_ARGS__)
+#define luaL_raisetypeerror(L, narg, tname) luaL_raisetypeerrorL(L, narg, tname)
+#define luaL_raiseargerror(L, narg, extramsg) luaL_raiseargerrorL(L, narg, extramsg)
+#else
 #define luaL_error(L, fmt, ...) luaL_errorL(L, fmt, ##__VA_ARGS__)
 #define luaL_typeerror(L, narg, tname) luaL_typeerrorL(L, narg, tname)
 #define luaL_argerror(L, narg, extramsg) luaL_argerrorL(L, narg, extramsg)
+#endif
 
 struct luaL_Reg
 {
@@ -18,8 +24,44 @@ typedef struct luaL_Reg luaL_Reg;
 LUALIB_API void luaL_register(lua_State* L, const char* libname, const luaL_Reg* l);
 LUALIB_API int luaL_getmetafield(lua_State* L, int obj, const char* e);
 LUALIB_API int luaL_callmeta(lua_State* L, int obj, const char* e);
+#if LUAU_ERRORS_AS_RETURNS
+LUALIB_API int luaL_raisetypeerrorL(lua_State* L, int narg, const char* tname);
+LUALIB_API int luaL_raiseargerrorL(lua_State* L, int narg, const char* extramsg);
+#else
 LUALIB_API l_noret luaL_typeerrorL(lua_State* L, int narg, const char* tname);
 LUALIB_API l_noret luaL_argerrorL(lua_State* L, int narg, const char* extramsg);
+#endif
+
+#if LUAU_ERRORS_AS_RETURNS
+LUALIB_API LUA_NODISCARD int luaL_requirelstring(lua_State* L, int narg, const char** out, size_t* len);
+LUALIB_API LUA_NODISCARD int luaL_requireoptlstring(lua_State* L, int narg, const char* def, const char** out, size_t* len);
+LUALIB_API LUA_NODISCARD int luaL_requirenumber(lua_State* L, int narg, double* out);
+LUALIB_API LUA_NODISCARD int luaL_requireoptnumber(lua_State* L, int narg, double def, double* out);
+
+LUALIB_API LUA_NODISCARD int luaL_requireboolean(lua_State* L, int narg, int* out);
+LUALIB_API LUA_NODISCARD int luaL_requireoptboolean(lua_State* L, int narg, int def, int* out);
+
+LUALIB_API LUA_NODISCARD int luaL_requireinteger(lua_State* L, int narg, int* out);
+LUALIB_API LUA_NODISCARD int luaL_requireinteger64(lua_State* L, int narg, int64_t* out);
+LUALIB_API LUA_NODISCARD int luaL_requireoptinteger(lua_State* L, int narg, int def, int* out);
+LUALIB_API LUA_NODISCARD int luaL_requireoptinteger64(lua_State* L, int narg, int64_t def, int64_t* out);
+LUALIB_API LUA_NODISCARD int luaL_requireunsigned(lua_State* L, int narg, unsigned* out);
+LUALIB_API LUA_NODISCARD int luaL_requireoptunsigned(lua_State* L, int narg, unsigned def, unsigned* out);
+
+LUALIB_API LUA_NODISCARD int luaL_requirevector(lua_State* L, int narg, const LUA_VECTOR_TYPE** out);
+LUALIB_API LUA_NODISCARD int luaL_requireoptvector(lua_State* L, int narg, const LUA_VECTOR_TYPE* def, const LUA_VECTOR_TYPE** out);
+
+LUALIB_API LUA_NODISCARD int luaL_requirestack(lua_State* L, int sz, const char* msg);
+LUALIB_API LUA_NODISCARD int luaL_requiretype(lua_State* L, int narg, int t);
+LUALIB_API LUA_NODISCARD int luaL_requireany(lua_State* L, int narg);
+
+LUALIB_API LUA_NODISCARD int luaL_requireudata(lua_State* L, int ud, const char* tname, void** out);
+LUALIB_API LUA_NODISCARD int luaL_requireudatatagged(lua_State* L, int ud, int tag, void** out);
+
+LUALIB_API LUA_NODISCARD int luaL_requirebuffer(lua_State* L, int narg, void** out, size_t* len);
+
+LUALIB_API LUA_NODISCARD int luaL_requireoption(lua_State* L, int narg, const char* def, const char* const lst[], int* out);
+#else
 LUALIB_API const char* luaL_checklstring(lua_State* L, int numArg, size_t* l);
 LUALIB_API const char* luaL_optlstring(lua_State* L, int numArg, const char* def, size_t* l);
 LUALIB_API double luaL_checknumber(lua_State* L, int numArg);
@@ -42,16 +84,22 @@ LUALIB_API void luaL_checkstack(lua_State* L, int sz, const char* msg);
 LUALIB_API void luaL_checktype(lua_State* L, int narg, int t);
 LUALIB_API void luaL_checkany(lua_State* L, int narg);
 
-LUALIB_API int luaL_newmetatable(lua_State* L, const char* tname);
 LUALIB_API void* luaL_checkudata(lua_State* L, int ud, const char* tname);
 LUALIB_API void* luaL_checkudatatagged(lua_State* L, int ud, int tag);
 
 LUALIB_API void* luaL_checkbuffer(lua_State* L, int narg, size_t* len);
 
-LUALIB_API void luaL_where(lua_State* L, int lvl);
-LUALIB_API LUA_PRINTF_ATTR(2, 3) l_noret luaL_errorL(lua_State* L, const char* fmt, ...);
-
 LUALIB_API int luaL_checkoption(lua_State* L, int narg, const char* def, const char* const lst[]);
+#endif
+
+LUALIB_API int luaL_newmetatable(lua_State* L, const char* tname);
+
+LUALIB_API void luaL_where(lua_State* L, int lvl);
+#if LUAU_ERRORS_AS_RETURNS
+LUALIB_API LUA_PRINTF_ATTR(2, 3) int luaL_raiseerrorL(lua_State* L, const char* fmt, ...);
+#else
+LUALIB_API LUA_PRINTF_ATTR(2, 3) l_noret luaL_errorL(lua_State* L, const char* fmt, ...);
+#endif
 
 LUALIB_API const char* luaL_tolstring(lua_State* L, int idx, size_t* len);
 
@@ -69,11 +117,35 @@ LUALIB_API void luaL_traceback(lua_State* L, lua_State* L1, const char* msg, int
 ** ===============================================================
 */
 
+#if LUAU_ERRORS_AS_RETURNS
+#define luaL_argrequire(L, cond, arg, extramsg) \
+    do \
+    { \
+        if (!(cond)) \
+            return luaL_raiseargerror(L, arg, extramsg); \
+    } while (0)
+#define luaL_argrequiretype(L, cond, arg, tname) \
+    do \
+    { \
+        if (!(cond)) \
+            return luaL_raisetypeerror(L, arg, tname); \
+    } while (0)
+#define luaL_propagate(L) \
+    do \
+    { \
+        if (lua_haserror(L)) \
+            return LUA_RAISED; \
+    } while (0)
+
+#define luaL_requirestring(L, n, out) (luaL_requirelstring(L, (n), (out), NULL))
+#define luaL_requireoptstring(L, n, d, out) (luaL_requireoptlstring(L, (n), (d), (out), NULL))
+#else
 #define luaL_argcheck(L, cond, arg, extramsg) ((void)((cond) ? (void)0 : luaL_argerror(L, arg, extramsg)))
 #define luaL_argexpected(L, cond, arg, tname) ((void)((cond) ? (void)0 : luaL_typeerror(L, arg, tname)))
 
 #define luaL_checkstring(L, n) (luaL_checklstring(L, (n), NULL))
 #define luaL_optstring(L, n, d) (luaL_optlstring(L, (n), (d), NULL))
+#endif
 
 #define luaL_getmetatable(L, n) (lua_getfield(L, LUA_REGISTRYINDEX, (n)))
 

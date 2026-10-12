@@ -233,6 +233,10 @@ typedef struct global_State
 
     struct lua_jmpbuf* errorjmp; // jump buffer data for longjmp-style error handling
 
+#if LUAU_ERRORS_AS_RETURNS
+    int errcode;
+#endif
+
     uint64_t rngstate; // PCG random number generator state
     uint64_t ptrenckey[4]; // pointer encoding key for display (remove when unreferenced)
 

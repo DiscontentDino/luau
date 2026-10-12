@@ -358,7 +358,13 @@ LUA_API int64_t lua_allocationrate(lua_State* L);
 ** miscellaneous functions
 */
 
+#if LUAU_ERRORS_AS_RETURNS
+#define LUA_RAISED (-1)
+LUA_API int lua_raiseerror(lua_State* L);
+LUA_API int lua_haserror(lua_State* L);
+#else
 LUA_API l_noret lua_error(lua_State* L);
+#endif
 
 LUA_API int lua_next(lua_State* L, int idx);
 LUA_API int lua_rawiter(lua_State* L, int idx, int iter);

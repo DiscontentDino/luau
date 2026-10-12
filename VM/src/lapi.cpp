@@ -1580,12 +1580,27 @@ void lua_memorydump(lua_State* L, void* file, lua_CategoryName categoryName)
 ** miscellaneous functions
 */
 
+#if LUAU_ERRORS_AS_RETURNS
+int lua_raiseerror(lua_State* L)
+{
+    api_checknelems(L, 1);
+
+    luaD_seterror(L, LUA_ERRRUN);
+    return LUA_RAISED;
+}
+
+int lua_haserror(lua_State* L)
+{
+    return L->global->errcode;
+}
+#else
 l_noret lua_error(lua_State* L)
 {
     api_checknelems(L, 1);
 
     luaD_throw(L, LUA_ERRRUN);
 }
+#endif
 
 int lua_next(lua_State* L, int idx)
 {

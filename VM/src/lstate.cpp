@@ -287,6 +287,9 @@ lua_State* lua_newstate(lua_Alloc allocator, void* ud)
         g->GCthreshold = 0; // mark it as unfinished state
         g->registryfree = 0;
         g->errorjmp = NULL;
+#if LUAU_ERRORS_AS_RETURNS
+        g->errcode = 0;
+#endif
         g->rngstate = 0;
         g->ptrenckey[0] = 1;
         g->ptrenckey[1] = 0;

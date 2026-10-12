@@ -32,6 +32,43 @@ static const char* currfuncname(lua_State* L)
         return debugname;
 }
 
+#if LUAU_ERRORS_AS_RETURNS
+int luaL_raiseargerrorL(lua_State* L, int narg, const char* extramsg)
+{
+    const char* fname = currfuncname(L);
+
+    if (fname)
+        return luaL_raiseerror(L, "invalid argument #%d to '%s' (%s)", narg, fname, extramsg);
+    else
+        return luaL_raiseerror(L, "invalid argument #%d (%s)", narg, extramsg);
+}
+
+int luaL_raisetypeerrorL(lua_State* L, int narg, const char* tname)
+{
+    const char* fname = currfuncname(L);
+    const TValue* obj = luaA_toobject(L, narg);
+
+    if (obj)
+    {
+        if (fname)
+            return luaL_raiseerror(L, "invalid argument #%d to '%s' (%s expected, got %s)", narg, fname, tname, luaT_objtypename(L, obj));
+        else
+            return luaL_raiseerror(L, "invalid argument #%d (%s expected, got %s)", narg, tname, luaT_objtypename(L, obj));
+    }
+    else
+    {
+        if (fname)
+            return luaL_raiseerror(L, "missing argument #%d to '%s' (%s expected)", narg, fname, tname);
+        else
+            return luaL_raiseerror(L, "missing argument #%d (%s expected)", narg, tname);
+    }
+}
+
+static int tag_raise(lua_State* L, int narg, int tag)
+{
+    return luaL_raisetypeerrorL(L, narg, lua_typename(L, tag));
+}
+#else
 l_noret luaL_argerrorL(lua_State* L, int narg, const char* extramsg)
 {
     const char* fname = currfuncname(L);
@@ -67,6 +104,7 @@ static l_noret tag_error(lua_State* L, int narg, int tag)
 {
     luaL_typeerrorL(L, narg, lua_typename(L, tag));
 }
+#endif
 
 // Can be called without stack space reservation
 void luaL_where(lua_State* L, int level)
@@ -82,6 +120,25 @@ void luaL_where(lua_State* L, int level)
     lua_pushliteral(L, ""); // else, no information available...
 }
 
+#if LUAU_ERRORS_AS_RETURNS
+// Can be called without stack space reservation
+int luaL_raiseerrorL(lua_State* L, const char* fmt, ...)
+{
+    va_list argp;
+    va_start(argp, fmt);
+    luaL_where(L, 1);
+    if (!lua_haserror(L))
+        lua_pushvfstring(L, fmt, argp);
+    va_end(argp);
+    if (!lua_haserror(L))
+        lua_concat(L, 2);
+
+    if (lua_haserror(L))
+        return LUA_RAISED;
+
+    return lua_raiseerror(L);
+}
+#else
 // Can be called without stack space reservation
 l_noret luaL_errorL(lua_State* L, const char* fmt, ...)
 {
@@ -93,19 +150,9 @@ l_noret luaL_errorL(lua_State* L, const char* fmt, ...)
     lua_concat(L, 2);
     lua_error(L);
 }
+#endif
 
 // }======================================================
-
-int luaL_checkoption(lua_State* L, int narg, const char* def, const char* const lst[])
-{
-    const char* name = (def) ? luaL_optstring(L, narg, def) : luaL_checkstring(L, narg);
-    int i;
-    for (i = 0; lst[i]; i++)
-        if (strcmp(lst[i], name) == 0)
-            return i;
-    const char* msg = lua_pushfstring(L, "invalid option '%s'", name);
-    luaL_argerrorL(L, narg, msg);
-}
 
 int luaL_newmetatable(lua_State* L, const char* tname)
 {
@@ -117,6 +164,278 @@ int luaL_newmetatable(lua_State* L, const char* tname)
     lua_pushvalue(L, -1);
     lua_setfield(L, LUA_REGISTRYINDEX, tname); // registry.name = metatable
     return 1;
+}
+
+#if LUAU_ERRORS_AS_RETURNS
+int luaL_requireoption(lua_State* L, int narg, const char* def, const char* const lst[], int* out)
+{
+    const char* name;
+    if (!(def ? luaL_requireoptstring(L, narg, def, &name) : luaL_requirestring(L, narg, &name)))
+        return 0;
+
+    for (int i = 0; lst[i]; i++)
+    {
+        if (strcmp(lst[i], name) == 0)
+        {
+            *out = i;
+            return 1;
+        }
+    }
+
+    const char* msg = lua_pushfstring(L, "invalid option '%s'", name);
+    if (!lua_haserror(L))
+        luaL_raiseargerrorL(L, narg, msg);
+    return 0;
+}
+
+int luaL_requireudata(lua_State* L, int ud, const char* tname, void** out)
+{
+    void* p = lua_touserdata(L, ud);
+    if (p != NULL)
+    { // value is a userdata?
+        if (lua_getmetatable(L, ud))
+        {                                              // does it have a metatable?
+            lua_getfield(L, LUA_REGISTRYINDEX, tname); // get correct metatable
+            if (lua_rawequal(L, -1, -2))
+            {                  // does it have the correct mt?
+                lua_pop(L, 2); // remove both metatables
+                *out = p;
+                return 1;
+            }
+        }
+    }
+    luaL_raisetypeerrorL(L, ud, tname); // else error
+    return 0;
+}
+
+int luaL_requireudatatagged(lua_State* L, int ud, int tag, void** out)
+{
+    void* p = lua_touserdatatagged(L, ud, tag);
+    if (p != NULL)
+    {
+        *out = p;
+        return 1;
+    }
+
+    const char* tname = lua_getuserdataname(L, tag);
+    luaL_raisetypeerrorL(L, ud, tname); // else error
+    return 0;
+}
+
+int luaL_requirebuffer(lua_State* L, int narg, void** out, size_t* len)
+{
+    void* b = lua_tobuffer(L, narg, len);
+    if (!b)
+    {
+        tag_raise(L, narg, LUA_TBUFFER);
+        return 0;
+    }
+    *out = b;
+    return 1;
+}
+
+int luaL_requirestack(lua_State* L, int space, const char* mes)
+{
+    if (!lua_checkstack(L, space))
+    {
+        luaL_raiseerror(L, "stack overflow (%s)", mes);
+        return 0;
+    }
+    return 1;
+}
+
+int luaL_requiretype(lua_State* L, int narg, int t)
+{
+    if (lua_type(L, narg) != t)
+    {
+        tag_raise(L, narg, t);
+        return 0;
+    }
+    return 1;
+}
+
+int luaL_requireany(lua_State* L, int narg)
+{
+    if (lua_type(L, narg) == LUA_TNONE)
+    {
+        luaL_raiseerror(L, "missing argument #%d", narg);
+        return 0;
+    }
+    return 1;
+}
+
+int luaL_requirelstring(lua_State* L, int narg, const char** out, size_t* len)
+{
+    const char* s = lua_tolstring(L, narg, len);
+    if (!s)
+    {
+        if (!lua_haserror(L))
+            tag_raise(L, narg, LUA_TSTRING);
+        return 0;
+    }
+    *out = s;
+    return 1;
+}
+
+int luaL_requireoptlstring(lua_State* L, int narg, const char* def, const char** out, size_t* len)
+{
+    if (lua_isnoneornil(L, narg))
+    {
+        if (len)
+            *len = (def ? strlen(def) : 0);
+        *out = def;
+        return 1;
+    }
+    else
+        return luaL_requirelstring(L, narg, out, len);
+}
+
+int luaL_requirenumber(lua_State* L, int narg, double* out)
+{
+    int isnum;
+    double d = lua_tonumberx(L, narg, &isnum);
+    if (!isnum)
+    {
+        tag_raise(L, narg, LUA_TNUMBER);
+        return 0;
+    }
+    *out = d;
+    return 1;
+}
+
+int luaL_requireoptnumber(lua_State* L, int narg, double def, double* out)
+{
+    if (lua_isnoneornil(L, narg))
+    {
+        *out = def;
+        return 1;
+    }
+    return luaL_requirenumber(L, narg, out);
+}
+
+int luaL_requireboolean(lua_State* L, int narg, int* out)
+{
+    // This checks specifically for boolean values, ignoring
+    // all other truthy/falsy values. If the desired result
+    // is true if value is present then lua_toboolean should
+    // directly be used instead.
+    if (!lua_isboolean(L, narg))
+    {
+        tag_raise(L, narg, LUA_TBOOLEAN);
+        return 0;
+    }
+    *out = lua_toboolean(L, narg);
+    return 1;
+}
+
+int luaL_requireoptboolean(lua_State* L, int narg, int def, int* out)
+{
+    if (lua_isnoneornil(L, narg))
+    {
+        *out = def;
+        return 1;
+    }
+    return luaL_requireboolean(L, narg, out);
+}
+
+int luaL_requireinteger(lua_State* L, int narg, int* out)
+{
+    int isnum;
+    int d = lua_tointegerx(L, narg, &isnum);
+    if (!isnum)
+    {
+        tag_raise(L, narg, LUA_TNUMBER);
+        return 0;
+    }
+    *out = d;
+    return 1;
+}
+
+int luaL_requireinteger64(lua_State* L, int narg, int64_t* out)
+{
+    if (!lua_isinteger64(L, narg))
+    {
+        tag_raise(L, narg, LUA_TINTEGER);
+        return 0;
+    }
+    *out = lua_tointeger64(L, narg, nullptr);
+    return 1;
+}
+
+int luaL_requireoptinteger(lua_State* L, int narg, int def, int* out)
+{
+    if (lua_isnoneornil(L, narg))
+    {
+        *out = def;
+        return 1;
+    }
+    return luaL_requireinteger(L, narg, out);
+}
+
+int luaL_requireoptinteger64(lua_State* L, int narg, int64_t def, int64_t* out)
+{
+    if (lua_isnoneornil(L, narg))
+    {
+        *out = def;
+        return 1;
+    }
+    return luaL_requireinteger64(L, narg, out);
+}
+
+int luaL_requireunsigned(lua_State* L, int narg, unsigned* out)
+{
+    int isnum;
+    unsigned d = lua_tounsignedx(L, narg, &isnum);
+    if (!isnum)
+    {
+        tag_raise(L, narg, LUA_TNUMBER);
+        return 0;
+    }
+    *out = d;
+    return 1;
+}
+
+int luaL_requireoptunsigned(lua_State* L, int narg, unsigned def, unsigned* out)
+{
+    if (lua_isnoneornil(L, narg))
+    {
+        *out = def;
+        return 1;
+    }
+    return luaL_requireunsigned(L, narg, out);
+}
+
+int luaL_requirevector(lua_State* L, int narg, const LUA_VECTOR_TYPE** out)
+{
+    const LUA_VECTOR_TYPE* v = lua_tovector(L, narg);
+    if (!v)
+    {
+        tag_raise(L, narg, LUA_TVECTOR);
+        return 0;
+    }
+    *out = v;
+    return 1;
+}
+
+int luaL_requireoptvector(lua_State* L, int narg, const LUA_VECTOR_TYPE* def, const LUA_VECTOR_TYPE** out)
+{
+    if (lua_isnoneornil(L, narg))
+    {
+        *out = def;
+        return 1;
+    }
+    return luaL_requirevector(L, narg, out);
+}
+#else
+int luaL_checkoption(lua_State* L, int narg, const char* def, const char* const lst[])
+{
+    const char* name = (def) ? luaL_optstring(L, narg, def) : luaL_checkstring(L, narg);
+    int i;
+    for (i = 0; lst[i]; i++)
+        if (strcmp(lst[i], name) == 0)
+            return i;
+    const char* msg = lua_pushfstring(L, "invalid option '%s'", name);
+    luaL_argerrorL(L, narg, msg);
 }
 
 void* luaL_checkudata(lua_State* L, int ud, const char* tname)
@@ -275,6 +594,7 @@ const LUA_VECTOR_TYPE* luaL_optvector(lua_State* L, int narg, const LUA_VECTOR_T
 {
     return luaL_opt(L, luaL_checkvector, narg, def);
 }
+#endif
 
 int luaL_getmetafield(lua_State* L, int obj, const char* event)
 {
