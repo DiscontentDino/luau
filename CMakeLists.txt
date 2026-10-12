@@ -13,6 +13,7 @@ option(LUAU_WERROR "Warnings as errors" OFF)
 option(LUAU_STATIC_CRT "Link with the static CRT (/MT)" OFF)
 option(LUAU_EXTERN_C "Use extern C for all APIs" OFF)
 option(LUAU_BUILD_SHARED "Build as a shared library" OFF)
+option(LUAU_ERRORS_AS_RETURNS "Error calls are returns instead of longjmp" OFF)
 
 # Compile time options for Luau features
 option(LUAU_VECTOR_DOUBLE "Use 64-bit doubles for vector components" OFF)
@@ -217,6 +218,10 @@ if(LUAU_EXTERN_C)
         target_compile_definitions(Luau.Compiler PUBLIC "LUACODE_API=extern \"C\"")
         target_compile_definitions(Luau.CodeGen PUBLIC "LUACODEGEN_API=extern \"C\"")
     endif()
+endif()
+
+if(LUAU_ERRORS_AS_RETURNS)
+    target_compile_definitions(Luau.VM PUBLIC "LUAU_ERRORS_AS_RETURNS=1")
 endif()
 
 if(LUAU_VECTOR_DOUBLE)
